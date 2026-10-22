@@ -48,7 +48,7 @@ function handleApiIndex(): Response {
   return jsonResponse({
     ok: true,
     service: "flare-image",
-    version: "1.5.0",
+    version: "1.6.0",
     auth: {
       login: "POST /api/login {username,password}",
       logout: "POST /api/logout",

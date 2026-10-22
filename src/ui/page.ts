@@ -137,6 +137,33 @@ export const DASHBOARD_HTML = `<!doctype html>
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
+<div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-labelledby="lightboxName" hidden>
+  <div class="lightbox-shell">
+    <header class="lightbox-head">
+      <div class="lightbox-title">
+        <span class="lightbox-name" id="lightboxName"></span>
+        <span class="lightbox-meta" id="lightboxMeta"></span>
+      </div>
+      <div class="lightbox-tools">
+        <button id="lightboxCopy" type="button">复制链接</button>
+        <a id="lightboxOpen" href="#" target="_blank" rel="noopener">原图</a>
+        <a id="lightboxDownload" href="#" download>下载</a>
+        <button class="lightbox-close" id="lightboxClose" type="button" aria-label="关闭预览">关闭</button>
+      </div>
+    </header>
+    <div class="lightbox-stage">
+      <button class="lightbox-nav prev" id="lightboxPrev" type="button" aria-label="上一张">‹</button>
+      <img id="lightboxImage" alt="">
+      <span class="lightbox-loading" id="lightboxLoading">载入中…</span>
+      <button class="lightbox-nav next" id="lightboxNext" type="button" aria-label="下一张">›</button>
+    </div>
+    <footer class="lightbox-foot">
+      <span>← → 切换 · Esc 关闭</span>
+      <span id="lightboxCount"></span>
+    </footer>
+  </div>
+</div>
+
 <script>${DASHBOARD_SCRIPT}</script>
 </body>
 </html>`;

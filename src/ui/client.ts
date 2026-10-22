@@ -33,14 +33,47 @@ export const DASHBOARD_SCRIPT = `
   var railUser = document.getElementById("railUser");
   var railScope = document.getElementById("railScope");
   var toastEl = document.getElementById("toast");
+  var lightbox = document.getElementById("lightbox");
+  var lightboxName = document.getElementById("lightboxName");
+  var lightboxMeta = document.getElementById("lightboxMeta");
+  var lightboxImage = document.getElementById("lightboxImage");
+  var lightboxLoading = document.getElementById("lightboxLoading");
+  var lightboxCount = document.getElementById("lightboxCount");
+  var lightboxCopy = document.getElementById("lightboxCopy");
+  var lightboxOpen = document.getElementById("lightboxOpen");
+  var lightboxDownload = document.getElementById("lightboxDownload");
+  var lightboxClose = document.getElementById("lightboxClose");
+  var lightboxPrev = document.getElementById("lightboxPrev");
+  var lightboxNext = document.getElementById("lightboxNext");
 
   var currentUser = null;
   var cursor = null;
   var hasMore = false;
-  var rendered = new Set();
+  var itemByKey = new Map();
   var loading = false;
   var uploading = false;
   var toastTimer = null;
+  var previewItems = [];
+  var previewIndex = -1;
+  var previewReturnFocus = null;
+
+  var imageObserver = null;
+  if ("IntersectionObserver" in window) {
+    imageObserver = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (!entry.isIntersecting) return;
+        imageObserver.unobserve(entry.target);
+        loadImage(entry.target);
+      });
+    }, { rootMargin: "320px 0px" });
+  }
+
+  function loadImage(image) {
+    var src = image.getAttribute("data-src");
+    if (!src) return;
+    image.removeAttribute("data-src");
+    image.src = src;
+  }
 
   function setStatus(text, tone) {
     statusText.textContent = text;
@@ -88,6 +121,77 @@ export const DASHBOARD_SCRIPT = `
     if (paragraphs[1]) paragraphs[1].textContent = secondary;
   }
 
+  function clearGrid() {
+    if (imageObserver) imageObserver.disconnect();
+    grid.textContent = "";
+    itemByKey.clear();
+  }
+
+  function galleryItems() {
+    var items = [];
+    for (var i = 0; i < grid.children.length; i++) {
+      var element = grid.children[i];
+      var key = element.getAttribute("data-key");
+      var item = key ? itemByKey.get(key) : null;
+      if (item) items.push(item);
+    }
+    return items;
+  }
+
+  function renderPreview() {
+    var item = previewItems[previewIndex];
+    if (!item) return;
+    lightboxName.textContent = fileName(item.key);
+    lightboxMeta.textContent = formatBytes(item.size) + (item.uploaded ? " · " + formatDate(item.uploaded) : "");
+    lightboxCount.textContent = (previewIndex + 1) + " / " + previewItems.length;
+    lightboxOpen.href = item.url;
+    lightboxDownload.href = item.url + (item.url.indexOf("?") === -1 ? "?" : "&") + "download=1";
+    lightboxImage.alt = fileName(item.key);
+    lightboxImage.classList.remove("loaded");
+    lightboxLoading.textContent = "载入中…";
+    lightboxLoading.hidden = false;
+    lightboxImage.src = item.url;
+    lightboxPrev.disabled = previewItems.length < 2;
+    lightboxNext.disabled = previewItems.length < 2;
+  }
+
+  function openPreview(item) {
+    var items = galleryItems();
+    var index = -1;
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].key === item.key) {
+        index = i;
+        break;
+      }
+    }
+    if (index === -1) return;
+    previewItems = items;
+    previewIndex = index;
+    previewReturnFocus = document.activeElement;
+    lightbox.hidden = false;
+    document.body.classList.add("preview-open");
+    renderPreview();
+    lightboxClose.focus();
+  }
+
+  function closePreview() {
+    if (lightbox.hidden) return;
+    lightbox.hidden = true;
+    document.body.classList.remove("preview-open");
+    lightboxImage.removeAttribute("src");
+    lightboxImage.classList.remove("loaded");
+    previewItems = [];
+    previewIndex = -1;
+    if (previewReturnFocus && document.contains(previewReturnFocus)) previewReturnFocus.focus();
+    previewReturnFocus = null;
+  }
+
+  function stepPreview(delta) {
+    if (previewItems.length < 2) return;
+    previewIndex = (previewIndex + delta + previewItems.length) % previewItems.length;
+    renderPreview();
+  }
+
   function refreshCount() {
     var count = grid.children.length;
     if (count === 0) {
@@ -112,24 +216,38 @@ export const DASHBOARD_SCRIPT = `
   }
 
   function addCard(item, prepend) {
-    if (rendered.has(item.key)) return;
-    rendered.add(item.key);
+    if (itemByKey.has(item.key)) return;
+    itemByKey.set(item.key, item);
 
     var figure = document.createElement("figure");
     figure.className = "frame";
+    figure.setAttribute("data-key", item.key);
 
     var link = document.createElement("a");
     link.className = "thumb";
     link.href = item.url;
     link.target = "_blank";
     link.rel = "noopener";
-    link.title = "打开原图";
+    link.title = "预览图片";
+    link.setAttribute("aria-label", "预览 " + fileName(item.key));
+    link.addEventListener("click", function (event) {
+      event.preventDefault();
+      openPreview(item);
+    });
 
     var image = document.createElement("img");
-    image.src = item.url;
     image.alt = fileName(item.key);
-    image.loading = "lazy";
-    image.decoding = "async";
+    image.setAttribute("loading", "lazy");
+    image.setAttribute("decoding", "async");
+    image.setAttribute("data-src", item.url);
+    image.addEventListener("load", function () {
+      image.classList.add("loaded");
+    });
+    image.addEventListener("error", function () {
+      link.classList.add("failed");
+    });
+    if (imageObserver) imageObserver.observe(image);
+    else loadImage(image);
 
     var ext = document.createElement("span");
     ext.className = "ext";
@@ -215,8 +333,8 @@ export const DASHBOARD_SCRIPT = `
     app.hidden = true;
     auth.hidden = false;
     userBar.hidden = true;
-    grid.textContent = "";
-    rendered.clear();
+    closePreview();
+    clearGrid();
     moreWrap.hidden = true;
     progress.hidden = true;
     railUser.textContent = "";
@@ -265,8 +383,10 @@ export const DASHBOARD_SCRIPT = `
       if (!response.ok || !data.ok) {
         throw new Error(data.error || ("HTTP " + response.status));
       }
+      var image = element.querySelector("img");
+      if (image && imageObserver) imageObserver.unobserve(image);
       element.remove();
-      rendered.delete(item.key);
+      itemByKey.delete(item.key);
       if (grid.children.length === 0 && hasMore && currentUser) {
         loadList(false);
       } else {
@@ -300,10 +420,7 @@ export const DASHBOARD_SCRIPT = `
         throw new Error(data.error || ("HTTP " + response.status));
       }
 
-      if (reset) {
-        grid.textContent = "";
-        rendered.clear();
-      }
+      if (reset) clearGrid();
       data.objects.forEach(function (object) {
         addCard(object, false);
       });
@@ -569,6 +686,59 @@ export const DASHBOARD_SCRIPT = `
 
   moreBtn.addEventListener("click", function () {
     loadList(false);
+  });
+
+  lightboxImage.addEventListener("load", function () {
+    lightboxImage.classList.add("loaded");
+    lightboxLoading.hidden = true;
+  });
+  lightboxImage.addEventListener("error", function () {
+    lightboxImage.classList.remove("loaded");
+    lightboxLoading.textContent = "预览载入失败";
+    lightboxLoading.hidden = false;
+  });
+  lightboxClose.addEventListener("click", closePreview);
+  lightboxPrev.addEventListener("click", function () {
+    stepPreview(-1);
+  });
+  lightboxNext.addEventListener("click", function () {
+    stepPreview(1);
+  });
+  lightboxCopy.addEventListener("click", function () {
+    if (previewItems[previewIndex]) copyText(previewItems[previewIndex].url);
+  });
+  lightbox.addEventListener("click", function (event) {
+    if (event.target === lightbox) closePreview();
+  });
+  document.addEventListener("keydown", function (event) {
+    if (lightbox.hidden) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closePreview();
+      return;
+    }
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      stepPreview(-1);
+      return;
+    }
+    if (event.key === "ArrowRight") {
+      event.preventDefault();
+      stepPreview(1);
+      return;
+    }
+    if (event.key !== "Tab") return;
+    var focusable = lightbox.querySelectorAll("button:not(:disabled),a[href]");
+    if (focusable.length === 0) return;
+    var first = focusable[0];
+    var last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
   });
 
   checkSession();
