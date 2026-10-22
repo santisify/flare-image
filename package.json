@@ -1,0 +1,20 @@
+{
+  "name": "flare-image",
+  "version": "1.1.0",
+  "private": true,
+  "description": "基于 Cloudflare Workers + R2 的免费图床",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "lint": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "wrangler deploy --dry-run",
+    "check": "npm run lint && npm run test"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241101.0",
+    "typescript": "^5.6.0",
+    "wrangler": "^3.89.0"
+  }
+}

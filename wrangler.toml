@@ -1,0 +1,22 @@
+name = "flare-image"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+
+[observability]
+enabled = true
+
+[[r2_buckets]]
+binding = "IMAGES"
+bucket_name = "flare-images"
+
+[vars]
+# 可选：自定义域名或 workers.dev 地址，用于生成返回的 url。
+# 留空 / 注释时自动使用当前请求的 origin。
+# PUBLIC_URL = "https://images.example.com"
+
+# 本地开发时可把密钥写入 .dev.vars（已在 .gitignore 中忽略）：
+#   UPLOAD_TOKEN="..."
+#   ADMIN_TOKEN="..."
+# 线上使用：
+#   npx wrangler secret put UPLOAD_TOKEN
+#   npx wrangler secret put ADMIN_TOKEN

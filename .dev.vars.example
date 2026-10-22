@@ -1,0 +1,5 @@
+# 复制为 .dev.vars 后用于 `npm run dev`
+# 生成随机令牌：openssl rand -hex 32
+
+UPLOAD_TOKEN="replace-with-a-random-upload-token"
+ADMIN_TOKEN="replace-with-a-random-admin-token"
