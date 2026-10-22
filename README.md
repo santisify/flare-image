@@ -8,9 +8,11 @@
 - **两种角色**：
   - 管理员：上传，查看全部图片，删除任意图片
   - 用户：上传，只能查看 / 删除自己的图片
+- **按用户归档**：图片统一存放在 `upload/file/<username-hash>/<id>.<ext>`，不再使用日期文件夹
 - **原始二进制上传**：`PUT /api/upload` 流式写入 R2，适合大图
 - **multipart 上传**：`POST /api/upload`，浏览器和表单友好，单次最多 10 个文件
-- **在线管理面板**：访问 `/`，拖拽、粘贴、预览、复制链接 / Markdown、删除
+- **在线管理面板**：访问 `/`，拖拽、粘贴、预览、复制链接 / Markdown / 下载、删除
+- **Light table 界面**：左侧上传工作台 + 右侧 contact sheet，图片优先，桌面与移动端自适应
 - **游标分页**：列表接口返回 `cursor` 与 `truncated`
 - **批量删除**：JSON 一次删除最多 1000 个对象
 - **下载优化**：`HEAD`、Range、`If-None-Match` / `If-Match`、`?download=1`
@@ -39,10 +41,20 @@ Cache API + CDN 缓存
 
 | 角色 | 上传目录 | 列表范围 | 删除范围 |
 |------|----------|----------|----------|
-| `admin` | `uploads/admin/...` | `uploads/` 全部 | 任意 key |
-| `user` | `uploads/user/...` | `uploads/user/` 自己的图片 | 仅 `uploads/user/` |
+| `admin` | `upload/file/<admin-hash>/...` | 全部对象 | 任意 key |
+| `user` | `upload/file/<user-hash>/...` | `upload/file/<user-hash>/` 自己的图片 | 仅自己的 hash 目录 |
+
+目录名不是用户名明文，而是：
+
+```text
+hash = SHA-256(用户名去首尾空格).hex.slice(0, 32)
+```
+
+例如 `user` → `04f8996da763b7a969b1028ee3007569`，`admin` → `8c6976e5b5410415bde908bd4dee15df`。同一用户名始终对应同一目录，URL 中不会出现用户名。
 
 > 当前只配置一个 `user` 账号。如果多人共用这个账号，他们会看到彼此的图片。要做到每人独立账号，需要引入数据库或 Cloudflare Access。
+>
+> 旧版 `uploads/YYYY/MM/DD/...` 和 `upload/file/<username>/...` 对象不会自动迁移，但仍可通过原 URL 访问；管理员默认列表包含全部对象，可以继续看到并清理旧文件。
 
 ## 免费额度
 
@@ -229,8 +241,8 @@ Content-Type: image/jpeg
 ```json
 {
   "ok": true,
-  "key": "uploads/admin/2026/10/21/a1b2c3d4e5f6.jpg",
-  "url": "https://flare-image.example.workers.dev/uploads/admin/2026/10/21/a1b2c3d4e5f6.jpg",
+  "key": "upload/file/8c6976e5b5410415bde908bd4dee15df/a1b2c3d4e5f6.jpg",
+  "url": "https://flare-image.example.workers.dev/upload/file/8c6976e5b5410415bde908bd4dee15df/a1b2c3d4e5f6.jpg",
   "size": 123456,
   "contentType": "image/jpeg"
 }
@@ -263,7 +275,7 @@ Form 字段：
 ### 下载
 
 ```http
-GET /uploads/admin/2026/10/21/a1b2c3d4e5f6.jpg
+GET /upload/file/8c6976e5b5410415bde908bd4dee15df/a1b2c3d4e5f6.jpg
 ```
 
 - 支持 `HEAD`
@@ -277,11 +289,11 @@ GET /uploads/admin/2026/10/21/a1b2c3d4e5f6.jpg
 ### 列表
 
 ```http
-GET /api/list?prefix=uploads/&limit=100&cursor=<cursor>
+GET /api/list?prefix=upload/file/&limit=100&cursor=<cursor>
 ```
 
-- 管理员默认列出 `uploads/` 全部
-- 用户默认只列出 `uploads/user/`，传其他前缀会返回 `403`
+- 管理员默认列出全部对象
+- 用户默认只列出 `upload/file/<username-hash>/`，传其他前缀会返回 `403`
 - `limit` 范围 1–1000，默认 100
 
 ```json
@@ -292,8 +304,8 @@ GET /api/list?prefix=uploads/&limit=100&cursor=<cursor>
   "cursor": "next-cursor",
   "objects": [
     {
-      "key": "uploads/user/2026/10/21/a1b2c3d4e5f6.jpg",
-      "url": "https://images.example.com/uploads/user/2026/10/21/a1b2c3d4e5f6.jpg",
+      "key": "upload/file/04f8996da763b7a969b1028ee3007569/a1b2c3d4e5f6.jpg",
+      "url": "https://images.example.com/upload/file/04f8996da763b7a969b1028ee3007569/a1b2c3d4e5f6.jpg",
       "size": 123456,
       "uploaded": "2026-10-21T12:00:00.000Z",
       "etag": "\"abc123\""
@@ -309,7 +321,7 @@ GET /api/list?prefix=uploads/&limit=100&cursor=<cursor>
 单个：
 
 ```http
-DELETE /api/delete?key=uploads/user/2026/10/21/a1b2c3d4e5f6.jpg
+DELETE /api/delete?key=upload/file/04f8996da763b7a969b1028ee3007569/a1b2c3d4e5f6.jpg
 ```
 
 批量：
@@ -318,21 +330,21 @@ DELETE /api/delete?key=uploads/user/2026/10/21/a1b2c3d4e5f6.jpg
 DELETE /api/delete
 Content-Type: application/json
 
-{ "keys": ["uploads/user/...jpg", "uploads/user/...png"] }
+{ "keys": ["upload/file/04f8996da763b7a969b1028ee3007569/...jpg"] }
 ```
 
 也支持 `POST /api/delete` 和 JSON 字段 `key`。单次最多 1000 个。
 
 - 管理员可删除任意图片
-- 用户只能删除 `uploads/user/` 下的图片
+- 用户只能删除自己 `upload/file/<username-hash>/` 下的图片
 
 返回：
 
 ```json
 {
   "ok": true,
-  "deleted": ["uploads/user/...jpg"],
-  "key": "uploads/user/...jpg"
+  "deleted": ["upload/file/04f8996da763b7a969b1028ee3007569/...jpg"],
+  "key": "upload/file/04f8996da763b7a969b1028ee3007569/...jpg"
 }
 ```
 
@@ -367,7 +379,8 @@ OPTIONS /api/*  # CORS 预检
 - 登录成功后签发 HMAC 签名的 HttpOnly Cookie，有效期 7 天
 - 生产环境 Cookie 自动带上 `Secure`，并设置 `SameSite=Lax`
 - 支持 HTTP Basic Auth 供 API 客户端使用
-- 用户只能列出 / 删除 `uploads/user/` 下的对象
+- 用户只能列出 / 删除自己 `upload/file/<username-hash>/` 下的对象
+- 目录名使用用户名 SHA-256 前 32 位，路径中不出现用户名明文
 - Key 仅允许 `[\w./-]`，拒绝 `..`、反斜杠、空段、控制字符
 - 扩展名白名单 + 请求 `Content-Type` 必须与扩展名一致
 - 单文件不超过 100 MB
@@ -410,12 +423,22 @@ flare-image/
 ├── package.json
 ├── tsconfig.json
 └── src/
-    ├── index.ts               # 路由、下载、缓存、CORS
+    ├── index.ts               # Worker 入口，只负责导出 fetch
+    ├── router.ts              # 路由分发、健康检查、API 索引、HTML 响应
     ├── auth.ts                # 登录、会话、角色鉴权
     ├── upload.ts              # 原始二进制 / multipart 上传
-    ├── admin.ts               # 列表、删除、缓存清理
-    ├── utils.ts               # 校验、URL、条件请求工具
-    └── ui.ts                  # 内置管理面板 HTML
+    ├── gallery.ts             # 列表、删除、缓存清理
+    ├── download.ts            # Range / 条件请求 / 边缘缓存
+    ├── lib/
+    │   ├── cache.ts           # Workers Cache API 适配
+    │   ├── constants.ts       # 大小限制、扩展名、缓存时长
+    │   ├── http.ts            # JSON / CORS / 条件请求响应
+    │   └── keys.ts            # 文件名、R2 key、URL 校验
+    └── ui/
+        ├── index.ts           # UI 导出
+        ├── page.ts            # HTML 结构
+        ├── styles.ts          # 设计系统与响应式样式
+        └── client.ts          # 登录、上传、列表、删除交互
 ```
 
 ## 使用示例
@@ -455,13 +478,13 @@ curl -u "admin:你的密码" "https://你的地址/api/list?limit=20"
 ```bash
 curl -u "admin:你的密码" -X DELETE "https://你的地址/api/delete" \
   -H "Content-Type: application/json" \
-  --data '{"keys":["uploads/user/2026/10/21/xxx.png"]}'
+  --data '{"keys":["upload/file/04f8996da763b7a969b1028ee3007569/xxx.png"]}'
 ```
 
 ### 下载附件
 
 ```bash
-curl -OJ "https://你的地址/uploads/user/2026/10/21/xxx.png?download=1"
+curl -OJ "https://你的地址/upload/file/04f8996da763b7a969b1028ee3007569/xxx.png?download=1"
 ```
 
 ## 参考

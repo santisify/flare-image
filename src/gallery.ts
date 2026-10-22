@@ -1,17 +1,10 @@
 import type { Env } from "../worker-configuration";
-import { requireAuth, uploadPrefix } from "./auth";
-import {
-  errorResponse,
-  getEdgeCache,
-  getPublicUrl,
-  jsonResponse,
-  objectUrl,
-  sanitizeKey,
-  sanitizePrefix,
-} from "./utils";
-import type { DeleteResponse, ListResponse } from "./utils";
-
-const MAX_DELETE_KEYS = 1000;
+import { requireAuth, storagePrefix } from "./auth";
+import { getEdgeCache } from "./lib/cache";
+import { MAX_DELETE_KEYS } from "./lib/constants";
+import { errorResponse, jsonResponse } from "./lib/http";
+import type { DeleteResponse, ListResponse } from "./lib/http";
+import { getPublicUrl, objectUrl, sanitizeKey, sanitizePrefix } from "./lib/keys";
 
 function cacheKeysFor(request: Request, env: Env, key: string): Request[] {
   const urls = new Set<string>([new URL(`/${key}`, request.url).toString()]);
@@ -91,7 +84,7 @@ export async function handleDelete(
   if (keys instanceof Response) return keys;
 
   if (user.role !== "admin") {
-    const allowedPrefix = `${uploadPrefix("user")}/`;
+    const allowedPrefix = `${await storagePrefix(user.username)}/`;
     const forbidden = keys.find((key) => !key.startsWith(allowedPrefix));
     if (forbidden) {
       return errorResponse("You can only delete your own images", 403, "FORBIDDEN");
@@ -116,14 +109,16 @@ export async function handleDelete(
   }
 }
 
-/** GET /api/list?prefix=uploads/&limit=100&cursor=... */
+/** GET /api/list?prefix=upload/file/&limit=100&cursor=... */
 export async function handleList(request: Request, env: Env): Promise<Response> {
   const auth = await requireAuth(request, env);
   if ("response" in auth) return auth.response;
   const { user } = auth;
 
   const url = new URL(request.url);
-  const defaultPrefix = user.role === "admin" ? "uploads/" : `${uploadPrefix("user")}/`;
+  // 管理员默认列出全部对象, 用户默认只列出自己目录。
+  const ownPrefix = `${await storagePrefix(user.username)}/`;
+  const defaultPrefix = user.role === "admin" ? "" : ownPrefix;
   const prefix = url.searchParams.get("prefix") ?? defaultPrefix;
   const cursor = url.searchParams.get("cursor") ?? undefined;
   const limitParam = url.searchParams.get("limit");
@@ -133,9 +128,8 @@ export async function handleList(request: Request, env: Env): Promise<Response> 
     return errorResponse("Invalid prefix", 400, "INVALID_PREFIX");
   }
   if (user.role !== "admin") {
-    const allowedPrefix = `${uploadPrefix("user")}/`;
     const normalizedPrefix = prefix.endsWith("/") ? prefix : `${prefix}/`;
-    if (!normalizedPrefix.startsWith(allowedPrefix)) {
+    if (!normalizedPrefix.startsWith(ownPrefix)) {
       return errorResponse("You can only list your own images", 403, "FORBIDDEN");
     }
   }

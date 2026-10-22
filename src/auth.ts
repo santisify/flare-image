@@ -1,5 +1,5 @@
 import type { Env } from "../worker-configuration";
-import { errorResponse, jsonResponse, timingSafeEqual } from "./utils";
+import { errorResponse, jsonResponse } from "./lib/http";
 
 export type Role = "admin" | "user";
 
@@ -52,11 +52,41 @@ export function isAuthConfigured(env: Env): boolean {
   return getAccounts(env).length > 0;
 }
 
-export function uploadPrefix(role: Role): string {
-  return `uploads/${role}`;
+/**
+ * 用户名不直接进入 R2 key, 而是取用户名 SHA-256 的前 32 位十六进制。
+ * 同一个用户名始终得到同一个目录, 路径中不会暴露用户名。
+ */
+async function storageHash(username: string): Promise<string> {
+  const normalized = username.trim();
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(normalized));
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("")
+    .slice(0, 32);
+}
+
+/** 每个用户独立目录, 不再按日期分层: upload/file/<username-hash>/<id>.<ext> */
+export async function storagePrefix(username: string): Promise<string> {
+  return `upload/file/${await storageHash(username)}`;
 }
 
 // ─── 密码登录 ───────────────────────────────────────────────────
+
+/** 对 SHA-256 摘要做定长比较, 避免密码 / 签名比较泄露时序信息。 */
+async function timingSafeEqual(a: string, b: string): Promise<boolean> {
+  const encoder = new TextEncoder();
+  const [digestA, digestB] = await Promise.all([
+    crypto.subtle.digest("SHA-256", encoder.encode(a)),
+    crypto.subtle.digest("SHA-256", encoder.encode(b)),
+  ]);
+  const bytesA = new Uint8Array(digestA);
+  const bytesB = new Uint8Array(digestB);
+  let diff = 0;
+  for (let i = 0; i < bytesA.length; i++) {
+    diff |= bytesA[i] ^ bytesB[i];
+  }
+  return diff === 0;
+}
 
 async function findAccount(env: Env, username: string, password: string): Promise<Account | null> {
   for (const account of getAccounts(env)) {

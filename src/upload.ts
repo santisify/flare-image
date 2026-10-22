@@ -1,21 +1,22 @@
 import type { Env } from "../worker-configuration";
-import { requireAuth, uploadPrefix } from "./auth";
+import { requireAuth, storagePrefix } from "./auth";
 import {
   ALLOWED_EXTENSIONS,
   IMAGE_CACHE_MAX_AGE,
   MAX_MULTIPART_FILES,
   MAX_UPLOAD_SIZE,
+} from "./lib/constants";
+import { errorResponse, jsonResponse } from "./lib/http";
+import type { UploadResponse } from "./lib/http";
+import {
   defaultFilename,
-  errorResponse,
   generateKey,
   isContentTypeAllowed,
-  jsonResponse,
   normalizeContentType,
   objectUrl,
   parseFilenameFromDisposition,
   validateFileExtension,
-} from "./utils";
-import type { UploadResponse } from "./utils";
+} from "./lib/keys";
 
 const UPLOAD_OPTIONS = {
   cacheControl: `public, max-age=${IMAGE_CACHE_MAX_AGE}, s-maxage=${IMAGE_CACHE_MAX_AGE}, immutable`,
@@ -94,7 +95,7 @@ export async function handleRawUpload(request: Request, env: Env): Promise<Respo
     return invalidContentType(normalizeContentType(requestContentType) ?? "", validation.ext);
   }
 
-  const key = generateKey(validation.ext, uploadPrefix(user.role));
+  const key = generateKey(validation.ext, await storagePrefix(user.username));
   try {
     const object = await env.IMAGES.put(key, request.body, {
       httpMetadata: {
@@ -165,6 +166,7 @@ export async function handleMultipartUpload(request: Request, env: Env): Promise
   const filenameField = formData.get("filename");
   const filenameOverride = files.length === 1 && typeof filenameField === "string" ? filenameField : null;
 
+  const prefix = await storagePrefix(user.username);
   const prepared: { file: File; upload: PreparedUpload }[] = [];
   for (const file of files) {
     if (file.size === 0) {
@@ -183,7 +185,7 @@ export async function handleMultipartUpload(request: Request, env: Env): Promise
     prepared.push({
       file,
       upload: {
-        key: generateKey(validation.ext, uploadPrefix(user.role)),
+        key: generateKey(validation.ext, prefix),
         filename,
         contentType: validation.mime,
       },
