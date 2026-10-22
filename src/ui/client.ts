@@ -56,6 +56,8 @@ export const DASHBOARD_SCRIPT = `
   var previewItems = [];
   var previewIndex = -1;
   var previewReturnFocus = null;
+  var columns = [];
+  var resizeTimer = null;
 
   var imageObserver = null;
   if ("IntersectionObserver" in window) {
@@ -121,17 +123,70 @@ export const DASHBOARD_SCRIPT = `
     if (paragraphs[1]) paragraphs[1].textContent = secondary;
   }
 
+  function columnCount() {
+    var compact = window.matchMedia && window.matchMedia("(max-width:640px)").matches;
+    var minWidth = compact ? 132 : 180;
+    var gap = compact ? 12 : 18;
+    var width = grid.clientWidth || grid.getBoundingClientRect().width || 0;
+    if (!width) return 1;
+    return Math.max(1, Math.floor((width + gap) / (minWidth + gap)));
+  }
+
+  function createColumns() {
+    columns = [];
+    grid.textContent = "";
+    var count = columnCount();
+    for (var i = 0; i < count; i++) {
+      var column = document.createElement("div");
+      column.className = "col";
+      grid.appendChild(column);
+      columns.push(column);
+    }
+  }
+
+  function shortestColumn() {
+    var best = columns[0];
+    var bestHeight = best.offsetHeight;
+    for (var i = 1; i < columns.length; i++) {
+      if (columns[i].offsetHeight < bestHeight) {
+        best = columns[i];
+        bestHeight = best.offsetHeight;
+      }
+    }
+    return best;
+  }
+
+  function rebuildColumns() {
+    var frames = Array.prototype.slice.call(grid.querySelectorAll(".frame"));
+    createColumns();
+    frames.forEach(function (frame) {
+      shortestColumn().appendChild(frame);
+    });
+  }
+
+  function ensureColumns() {
+    if (columns.length !== columnCount()) rebuildColumns();
+  }
+
+  function placeFrame(figure, prepend) {
+    ensureColumns();
+    var target = prepend ? columns[0] : shortestColumn();
+    if (prepend && target.firstChild) target.insertBefore(figure, target.firstChild);
+    else target.appendChild(figure);
+  }
+
   function clearGrid() {
     if (imageObserver) imageObserver.disconnect();
     grid.textContent = "";
+    columns = [];
     itemByKey.clear();
   }
 
   function galleryItems() {
     var items = [];
-    for (var i = 0; i < grid.children.length; i++) {
-      var element = grid.children[i];
-      var key = element.getAttribute("data-key");
+    var elements = grid.querySelectorAll(".frame");
+    for (var i = 0; i < elements.length; i++) {
+      var key = elements[i].getAttribute("data-key");
       var item = key ? itemByKey.get(key) : null;
       if (item) items.push(item);
     }
@@ -193,7 +248,7 @@ export const DASHBOARD_SCRIPT = `
   }
 
   function refreshCount() {
-    var count = grid.children.length;
+    var count = grid.querySelectorAll(".frame").length;
     if (count === 0) {
       sheetSub.textContent = "没有图片";
       setEmptyMessage("还没有图片", "从左边放入第一张图片，链接会出现在这里。");
@@ -242,6 +297,7 @@ export const DASHBOARD_SCRIPT = `
     image.setAttribute("data-src", item.url);
     image.addEventListener("load", function () {
       image.classList.add("loaded");
+      link.classList.add("loaded");
     });
     image.addEventListener("error", function () {
       link.classList.add("failed");
@@ -297,8 +353,7 @@ export const DASHBOARD_SCRIPT = `
     figure.appendChild(link);
     figure.appendChild(caption);
 
-    if (prepend && grid.firstChild) grid.insertBefore(figure, grid.firstChild);
-    else grid.appendChild(figure);
+    placeFrame(figure, prepend);
     empty.hidden = true;
   }
 
@@ -387,7 +442,7 @@ export const DASHBOARD_SCRIPT = `
       if (image && imageObserver) imageObserver.unobserve(image);
       element.remove();
       itemByKey.delete(item.key);
-      if (grid.children.length === 0 && hasMore && currentUser) {
+      if (grid.querySelectorAll(".frame").length === 0 && hasMore && currentUser) {
         loadList(false);
       } else {
         refreshCount();
@@ -678,6 +733,13 @@ export const DASHBOARD_SCRIPT = `
   fileInput.addEventListener("change", function () {
     if (fileInput.files && fileInput.files.length) uploadFiles(fileInput.files);
     fileInput.value = "";
+  });
+
+  window.addEventListener("resize", function () {
+    if (resizeTimer) clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(function () {
+      if (columns.length !== columnCount()) rebuildColumns();
+    }, 150);
   });
 
   refreshBtn.addEventListener("click", function () {

@@ -438,15 +438,22 @@ export const DASHBOARD_STYLES = `
   .btn:hover{background:var(--ink);color:var(--paper-2)}
   .btn:disabled{opacity:.4;cursor:default}
   .grid{
-    column-width:180px;
-    column-gap:18px;
+    display:flex;
+    align-items:flex-start;
+    gap:18px;
     padding-top:26px;
   }
-  .frame{break-inside:avoid;margin:0 0 24px;min-width:0}
+  .col{
+    display:flex;
+    flex:1 1 0;
+    flex-direction:column;
+    gap:24px;
+    min-width:0;
+  }
+  .frame{margin:0;min-width:0}
   .thumb{
     position:relative;
     display:block;
-    min-height:120px;
     border:1px solid var(--line);
     background-color:var(--surface);
     background-image:
@@ -458,6 +465,7 @@ export const DASHBOARD_STYLES = `
     background-position:0 0,0 8px,8px -8px,-8px 0;
     overflow:hidden;
   }
+  .thumb:not(.loaded){min-height:120px}
   .thumb:after{
     content:"";
     position:absolute;
@@ -470,8 +478,6 @@ export const DASHBOARD_STYLES = `
     display:block;
     width:100%;
     height:auto;
-    max-height:70vh;
-    object-fit:contain;
     opacity:0;
     transition:opacity .2s;
   }
@@ -777,8 +783,8 @@ export const DASHBOARD_STYLES = `
     .rail{padding:26px 18px}
     .gallery{padding:26px 16px 48px}
     .gallery-head{align-items:flex-start;gap:16px}
-    .grid{column-width:132px;column-gap:12px}
-    .frame{margin-bottom:18px}
+    .grid{gap:12px}
+    .col{gap:18px}
     .lightbox{padding:8px}
     .lightbox-head{flex-direction:column;align-items:flex-start;gap:10px}
     .lightbox-tools{width:100%;justify-content:flex-start}
