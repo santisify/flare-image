@@ -1,5 +1,10 @@
 # 复制为 .dev.vars 后用于 `npm run dev`
-# 生成随机令牌：openssl rand -hex 32
+# 生成随机密码：openssl rand -base64 24
 
-UPLOAD_TOKEN="replace-with-a-random-upload-token"
-ADMIN_TOKEN="replace-with-a-random-admin-token"
+ADMIN_USERNAME="admin"
+ADMIN_PASSWORD="replace-with-a-strong-admin-password"
+USER_USERNAME="user"
+USER_PASSWORD="replace-with-a-strong-user-password"
+
+# 可选：会话签名密钥。不设置时会从账号密码派生。
+# SESSION_SECRET="replace-with-a-long-random-string"

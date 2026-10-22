@@ -1,10 +1,10 @@
 import type { Env } from "../worker-configuration";
+import { requireAuth, uploadPrefix } from "./auth";
 import {
   ALLOWED_EXTENSIONS,
   IMAGE_CACHE_MAX_AGE,
   MAX_MULTIPART_FILES,
   MAX_UPLOAD_SIZE,
-  authorize,
   defaultFilename,
   errorResponse,
   generateKey,
@@ -60,8 +60,9 @@ function contentLength(request: Request): number | null {
 
 /** PUT /api/upload?filename=photo.jpg (请求体为原始二进制) */
 export async function handleRawUpload(request: Request, env: Env): Promise<Response> {
-  const unauthorized = await authorize(request, env.UPLOAD_TOKEN, "UPLOAD_TOKEN");
-  if (unauthorized) return unauthorized;
+  const auth = await requireAuth(request, env);
+  if ("response" in auth) return auth.response;
+  const { user } = auth;
 
   const declaredSize = contentLength(request);
   if (declaredSize === null && request.headers.has("Content-Length")) {
@@ -93,7 +94,7 @@ export async function handleRawUpload(request: Request, env: Env): Promise<Respo
     return invalidContentType(normalizeContentType(requestContentType) ?? "", validation.ext);
   }
 
-  const key = generateKey(validation.ext);
+  const key = generateKey(validation.ext, uploadPrefix(user.role));
   try {
     const object = await env.IMAGES.put(key, request.body, {
       httpMetadata: {
@@ -101,6 +102,8 @@ export async function handleRawUpload(request: Request, env: Env): Promise<Respo
         cacheControl: UPLOAD_OPTIONS.cacheControl,
       },
       customMetadata: {
+        owner: user.username.slice(0, 128),
+        role: user.role,
         originalFilename: rawFilename.slice(0, 256),
         uploadedAt: new Date().toISOString(),
       },
@@ -128,8 +131,9 @@ export async function handleRawUpload(request: Request, env: Env): Promise<Respo
 
 /** POST /api/upload (multipart/form-data, 浏览器友好) */
 export async function handleMultipartUpload(request: Request, env: Env): Promise<Response> {
-  const unauthorized = await authorize(request, env.UPLOAD_TOKEN, "UPLOAD_TOKEN");
-  if (unauthorized) return unauthorized;
+  const auth = await requireAuth(request, env);
+  if ("response" in auth) return auth.response;
+  const { user } = auth;
 
   const declaredSize = contentLength(request);
   if (declaredSize !== null && declaredSize > MAX_UPLOAD_SIZE + 1024 * 1024) {
@@ -179,7 +183,7 @@ export async function handleMultipartUpload(request: Request, env: Env): Promise
     prepared.push({
       file,
       upload: {
-        key: generateKey(validation.ext),
+        key: generateKey(validation.ext, uploadPrefix(user.role)),
         filename,
         contentType: validation.mime,
       },
@@ -195,6 +199,8 @@ export async function handleMultipartUpload(request: Request, env: Env): Promise
           cacheControl: UPLOAD_OPTIONS.cacheControl,
         },
         customMetadata: {
+          owner: user.username.slice(0, 128),
+          role: user.role,
           originalFilename: upload.filename.slice(0, 256),
           uploadedAt: new Date().toISOString(),
         },

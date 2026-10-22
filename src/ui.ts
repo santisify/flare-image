@@ -1,6 +1,6 @@
 /**
  * 管理面板。单文件、无外部依赖，直接由 Worker 返回。
- * 令牌只保存在浏览器 localStorage，不会写入 HTML。
+ * 登录态使用 HttpOnly Cookie，页面不保存密码。
  */
 export const DASHBOARD_HTML = `<!doctype html>
 <html lang="zh-CN">
@@ -63,16 +63,82 @@ export const DASHBOARD_HTML = `<!doctype html>
   .mast-meta{
     display:flex;
     align-items:center;
-    gap:8px;
+    gap:9px;
     font-family:var(--mono);
     font-size:11px;
-    letter-spacing:.06em;
+    letter-spacing:.04em;
     color:var(--muted);
   }
-  .dot{width:8px;height:8px;border-radius:50%;background:var(--rule);display:inline-block;transition:background .2s,box-shadow .2s}
-  .dot.on{background:#2f7a4f;box-shadow:0 0 0 3px rgba(47,122,79,.13)}
+  .user-name{color:var(--ink)}
+  .role-badge{
+    padding:2px 6px;
+    border:1px solid var(--rule);
+    color:var(--muted);
+    font-size:10px;
+    white-space:nowrap;
+  }
+  .role-badge.admin{border-color:var(--safelight);color:var(--safelight)}
   main{max-width:1280px;margin:0 auto;padding:0 28px 64px}
-  .intro{padding:60px 0 42px;max-width:920px}
+  .boot{
+    padding:90px 0;
+    text-align:center;
+    font-family:var(--mono);
+    font-size:12px;
+    color:var(--muted);
+  }
+  .auth-wrap{display:flex;justify-content:center;padding:48px 0 20px}
+  .auth-card{
+    width:min(440px,100%);
+    padding:34px;
+    border:2px solid var(--ink);
+    background:var(--paper-2);
+  }
+  .auth-card h1{
+    margin:0 0 10px;
+    font-family:var(--serif);
+    font-size:38px;
+    font-weight:500;
+    letter-spacing:-.02em;
+  }
+  .auth-sub{margin:0 0 26px;font-size:14px;color:#454a42}
+  .auth-field{margin-bottom:16px}
+  .auth-field label{
+    display:block;
+    margin-bottom:7px;
+    font-family:var(--mono);
+    font-size:10px;
+    letter-spacing:.1em;
+    color:var(--muted);
+  }
+  .auth-field input{
+    width:100%;
+    padding:11px 12px;
+    border:1px solid var(--ink);
+    border-radius:0;
+    background:var(--white);
+    color:var(--ink);
+    font-family:var(--sans);
+    font-size:15px;
+    outline:none;
+  }
+  .auth-field input:focus{box-shadow:inset 0 0 0 2px var(--cyan)}
+  .auth-error{min-height:20px;margin:0 0 12px;color:var(--safelight);font-size:13px}
+  .auth-btn{
+    width:100%;
+    padding:12px;
+    border:1px solid var(--ink);
+    border-radius:0;
+    background:var(--ink);
+    color:var(--paper-2);
+    font-family:var(--sans);
+    font-size:15px;
+    font-weight:600;
+    cursor:pointer;
+    transition:background .15s,border-color .15s;
+  }
+  .auth-btn:hover{background:var(--cyan);border-color:var(--cyan)}
+  .auth-btn:disabled{opacity:.5;cursor:default}
+  .auth-note{margin:18px 0 0;font-size:12px;line-height:1.6;color:var(--muted)}
   .kicker{
     margin:0 0 18px;
     font-family:var(--mono);
@@ -80,6 +146,7 @@ export const DASHBOARD_HTML = `<!doctype html>
     letter-spacing:.1em;
     color:var(--muted);
   }
+  .intro{padding:56px 0 42px;max-width:920px}
   .intro h1{
     margin:0 0 22px;
     font-family:var(--serif);
@@ -168,44 +235,6 @@ export const DASHBOARD_HTML = `<!doctype html>
     letter-spacing:.03em;
     color:#8a8d82;
   }
-  .field{margin-top:24px}
-  .field > label{
-    display:block;
-    margin-bottom:7px;
-    font-family:var(--mono);
-    font-size:10px;
-    letter-spacing:.1em;
-    color:var(--muted);
-  }
-  .token-row{display:flex}
-  .token-row input{
-    flex:1;
-    min-width:0;
-    padding:10px 12px;
-    border:1px solid var(--ink);
-    border-right:0;
-    border-radius:0;
-    background:var(--white);
-    color:var(--ink);
-    font-family:var(--mono);
-    font-size:13px;
-    outline:none;
-  }
-  .token-row input:focus{box-shadow:inset 0 0 0 2px var(--cyan)}
-  .ghost{
-    padding:8px 13px;
-    border:1px solid var(--ink);
-    border-radius:0;
-    background:transparent;
-    color:var(--ink);
-    font-family:var(--sans);
-    font-size:12px;
-    cursor:pointer;
-    transition:background .15s,color .15s;
-  }
-  .ghost:hover{background:var(--ink);color:var(--paper-2)}
-  .ghost:disabled{opacity:.45;cursor:default}
-  .hint{margin:8px 0 0;font-size:12px;line-height:1.5;color:var(--muted)}
   .progress{margin-top:20px;font-family:var(--mono);font-size:11px;color:var(--cyan)}
   .progress-bar{display:block;height:4px;margin-top:7px;background:var(--rule);overflow:hidden}
   .progress-bar i{display:block;width:0;height:100%;background:var(--safelight);transition:width .25s}
@@ -293,6 +322,20 @@ export const DASHBOARD_HTML = `<!doctype html>
     letter-spacing:.06em;
     cursor:pointer;
   }
+  .ghost{
+    padding:8px 13px;
+    border:1px solid var(--ink);
+    border-radius:0;
+    background:transparent;
+    color:var(--ink);
+    font-family:var(--sans);
+    font-size:12px;
+    cursor:pointer;
+    transition:background .15s,color .15s;
+  }
+  .ghost:hover{background:var(--ink);color:var(--paper-2)}
+  .ghost:disabled{opacity:.45;cursor:default}
+  .ghost.small{padding:5px 10px;font-size:11px}
   footer{
     max-width:1280px;
     margin:0 auto;
@@ -333,6 +376,8 @@ export const DASHBOARD_HTML = `<!doctype html>
   @media (max-width:860px){
     .masthead{padding:16px 18px}
     main{padding:0 18px 48px}
+    .auth-wrap{padding:30px 0 10px}
+    .auth-card{padding:24px}
     .intro{padding:40px 0 30px}
     .workbench{grid-template-columns:1fr}
     .easel,.sheet{padding:20px}
@@ -344,67 +389,84 @@ export const DASHBOARD_HTML = `<!doctype html>
 <body>
 <header class="masthead">
   <a class="wordmark" href="/"><span class="spark">*</span> FLARE<span class="slash">/</span>IMAGE</a>
-  <div class="mast-meta">
-    <span class="dot" id="tokenDot"></span>
-    <span id="tokenState">未设置令牌</span>
+  <div class="mast-meta" id="userBar" hidden>
+    <span class="user-name" id="userName"></span>
+    <span class="role-badge" id="roleBadge"></span>
+    <button id="logout" class="ghost small" type="button">退出</button>
   </div>
 </header>
 
 <main>
-  <section class="intro">
-    <p class="kicker">Cloudflare Workers / R2</p>
-    <h1>让图片变成<br>一条链接。</h1>
-    <p class="lede">拖入、粘贴或选择图片。上传后得到永久链接，可以直接放进博客、文档或聊天窗口。</p>
+  <div class="boot" id="boot">正在检查登录状态…</div>
+
+  <section class="auth-wrap" id="auth" hidden>
+    <div class="auth-card">
+      <p class="kicker">Cloudflare Workers / R2</p>
+      <h1>登录图床</h1>
+      <p class="auth-sub">使用部署时配置的管理员或用户账号。</p>
+      <form id="loginForm" novalidate>
+        <div class="auth-field">
+          <label for="username">用户名</label>
+          <input id="username" name="username" type="text" autocomplete="username" spellcheck="false" required>
+        </div>
+        <div class="auth-field">
+          <label for="password">密码</label>
+          <input id="password" name="password" type="password" autocomplete="current-password" required>
+        </div>
+        <p class="auth-error" id="loginError" role="alert"></p>
+        <button class="auth-btn" id="loginBtn" type="submit">登录</button>
+      </form>
+      <p class="auth-note">账号和密码由部署者在环境变量中配置，登录状态保存在 HttpOnly Cookie 中。</p>
+    </div>
   </section>
 
-  <div class="workbench">
-    <section class="easel" aria-labelledby="uploadHeading">
-      <div class="panel-head">
-        <h2 id="uploadHeading">曝光台</h2>
-        <span class="lamp" id="lamp"><i aria-hidden="true"></i><span id="lampText">待机</span></span>
-      </div>
-
-      <label class="drop" id="drop" for="fileInput" tabindex="0" role="button" aria-label="选择或拖入图片">
-        <input id="fileInput" type="file" accept="image/*" multiple>
-        <span class="drop-icon" aria-hidden="true">+</span>
-        <span class="drop-title">拖入图片，或点击选择</span>
-        <span class="drop-hint">也可以直接按 Ctrl / ⌘ + V 粘贴截图</span>
-        <span class="drop-formats">JPG · PNG · GIF · WEBP · AVIF · SVG · BMP · ICO · TIFF · HEIC</span>
-      </label>
-
-      <div class="field">
-        <label for="token">令牌</label>
-        <div class="token-row">
-          <input id="token" type="password" placeholder="UPLOAD_TOKEN" autocomplete="off" spellcheck="false">
-          <button id="tokenToggle" class="ghost" type="button" aria-label="显示令牌">显示</button>
-        </div>
-        <p class="hint">只保存在此浏览器。上传使用 UPLOAD_TOKEN；载入列表与删除需要 ADMIN_TOKEN。</p>
-      </div>
-
-      <div class="progress" id="progress" hidden>
-        <span id="progressText">上传中</span>
-        <span class="progress-bar"><i id="progressBar"></i></span>
-      </div>
+  <div id="app" hidden>
+    <section class="intro">
+      <p class="kicker">Cloudflare Workers / R2</p>
+      <h1>让图片变成<br>一条链接。</h1>
+      <p class="lede">拖入、粘贴或选择图片。上传后得到永久链接，可以直接放进博客、文档或聊天窗口。</p>
     </section>
 
-    <section class="sheet" aria-labelledby="sheetHeading">
-      <div class="sheet-head">
-        <div>
-          <h2 id="sheetHeading">图片列表</h2>
-          <p class="sheet-sub" id="sheetSub">设置令牌后载入</p>
+    <div class="workbench">
+      <section class="easel" aria-labelledby="uploadHeading">
+        <div class="panel-head">
+          <h2 id="uploadHeading">曝光台</h2>
+          <span class="lamp" id="lamp"><i aria-hidden="true"></i><span id="lampText">待机</span></span>
         </div>
-        <button id="refresh" class="ghost" type="button">刷新</button>
-      </div>
 
-      <div class="grid" id="grid"></div>
-      <div class="empty" id="empty">
-        <p>还没有图片。</p>
-        <p>上传第一张后，链接会出现在这里。</p>
-      </div>
-      <div class="more-wrap" id="moreWrap" hidden>
-        <button id="more" class="text-btn" type="button">加载更多</button>
-      </div>
-    </section>
+        <label class="drop" id="drop" for="fileInput" tabindex="0" role="button" aria-label="选择或拖入图片">
+          <input id="fileInput" type="file" accept="image/*" multiple>
+          <span class="drop-icon" aria-hidden="true">+</span>
+          <span class="drop-title">拖入图片，或点击选择</span>
+          <span class="drop-hint">也可以直接按 Ctrl / ⌘ + V 粘贴截图</span>
+          <span class="drop-formats">JPG · PNG · GIF · WEBP · AVIF · SVG · BMP · ICO · TIFF · HEIC</span>
+        </label>
+
+        <div class="progress" id="progress" hidden>
+          <span id="progressText">上传中</span>
+          <span class="progress-bar"><i id="progressBar"></i></span>
+        </div>
+      </section>
+
+      <section class="sheet" aria-labelledby="sheetHeading">
+        <div class="sheet-head">
+          <div>
+            <h2 id="sheetHeading">图片列表</h2>
+            <p class="sheet-sub" id="sheetSub">正在载入</p>
+          </div>
+          <button id="refresh" class="ghost" type="button">刷新</button>
+        </div>
+
+        <div class="grid" id="grid"></div>
+        <div class="empty" id="empty">
+          <p>还没有图片。</p>
+          <p>上传第一张后，链接会出现在这里。</p>
+        </div>
+        <div class="more-wrap" id="moreWrap" hidden>
+          <button id="more" class="text-btn" type="button">加载更多</button>
+        </div>
+      </section>
+    </div>
   </div>
 </main>
 
@@ -419,11 +481,18 @@ export const DASHBOARD_HTML = `<!doctype html>
 (function () {
   "use strict";
 
-  var TOKEN_KEY = "flare.image.token";
-  var tokenInput = document.getElementById("token");
-  var tokenToggle = document.getElementById("tokenToggle");
-  var tokenDot = document.getElementById("tokenDot");
-  var tokenState = document.getElementById("tokenState");
+  var boot = document.getElementById("boot");
+  var auth = document.getElementById("auth");
+  var app = document.getElementById("app");
+  var userBar = document.getElementById("userBar");
+  var userName = document.getElementById("userName");
+  var roleBadge = document.getElementById("roleBadge");
+  var logoutBtn = document.getElementById("logout");
+  var loginForm = document.getElementById("loginForm");
+  var loginBtn = document.getElementById("loginBtn");
+  var loginError = document.getElementById("loginError");
+  var usernameInput = document.getElementById("username");
+  var passwordInput = document.getElementById("password");
   var drop = document.getElementById("drop");
   var fileInput = document.getElementById("fileInput");
   var progress = document.getElementById("progress");
@@ -436,38 +505,13 @@ export const DASHBOARD_HTML = `<!doctype html>
   var moreWrap = document.getElementById("moreWrap");
   var moreBtn = document.getElementById("more");
   var refreshBtn = document.getElementById("refresh");
+  var sheetHeading = document.getElementById("sheetHeading");
   var sheetSub = document.getElementById("sheetSub");
   var toastEl = document.getElementById("toast");
+  var currentUser = null;
   var cursor = null;
   var loading = false;
   var toastTimer = null;
-
-  function getToken() {
-    return tokenInput.value.trim();
-  }
-
-  function loadStoredToken() {
-    try {
-      return localStorage.getItem(TOKEN_KEY) || "";
-    } catch (error) {
-      return "";
-    }
-  }
-
-  function storeToken(value) {
-    try {
-      if (value) localStorage.setItem(TOKEN_KEY, value);
-      else localStorage.removeItem(TOKEN_KEY);
-    } catch (error) {
-      /* localStorage 不可用时仅本次会话有效 */
-    }
-  }
-
-  function updateTokenState() {
-    var hasToken = Boolean(getToken());
-    tokenDot.classList.toggle("on", hasToken);
-    tokenState.textContent = hasToken ? "令牌已设置" : "未设置令牌";
-  }
 
   function toast(message) {
     toastEl.textContent = message;
@@ -476,13 +520,6 @@ export const DASHBOARD_HTML = `<!doctype html>
     toastTimer = setTimeout(function () {
       toastEl.classList.remove("show");
     }, 2400);
-  }
-
-  function authHeaders(extra) {
-    var headers = extra || {};
-    var token = getToken();
-    if (token) headers["Authorization"] = "Bearer " + token;
-    return headers;
   }
 
   function formatBytes(bytes) {
@@ -590,13 +627,48 @@ export const DASHBOARD_HTML = `<!doctype html>
     }
   }
 
+  function showLogin(message) {
+    currentUser = null;
+    boot.hidden = true;
+    app.hidden = true;
+    auth.hidden = false;
+    userBar.hidden = true;
+    grid.textContent = "";
+    cursor = null;
+    moreWrap.hidden = true;
+    sheetSub.textContent = "请先登录";
+    if (message) loginError.textContent = message;
+    window.setTimeout(function () {
+      usernameInput.focus();
+    }, 0);
+  }
+
+  function showApp(user) {
+    currentUser = user;
+    boot.hidden = true;
+    auth.hidden = true;
+    app.hidden = false;
+    userBar.hidden = false;
+    loginError.textContent = "";
+    userName.textContent = user.username;
+    var isAdmin = user.role === "admin";
+    roleBadge.textContent = isAdmin ? "管理员" : "用户";
+    roleBadge.classList.toggle("admin", isAdmin);
+    sheetHeading.textContent = isAdmin ? "全部图片" : "我的图片";
+    loadList(true);
+  }
+
   async function removeItem(item, element) {
     if (!window.confirm("删除这张图片？此操作不可撤销。")) return;
     try {
       var response = await fetch("/api/delete?key=" + encodeURIComponent(item.key), {
         method: "DELETE",
-        headers: authHeaders()
+        credentials: "same-origin"
       });
+      if (response.status === 401) {
+        showLogin("登录已过期，请重新登录。");
+        return;
+      }
       var data = await response.json().catch(function () {
         return {};
       });
@@ -617,19 +689,7 @@ export const DASHBOARD_HTML = `<!doctype html>
   }
 
   async function loadList(reset) {
-    if (loading) return;
-    if (!getToken()) {
-      if (reset) {
-        grid.textContent = "";
-        cursor = null;
-        moreWrap.hidden = true;
-        sheetSub.textContent = "需要令牌";
-        setEmptyMessage("设置令牌后载入图片列表。");
-        empty.hidden = false;
-      }
-      return;
-    }
-
+    if (loading || !currentUser) return;
     loading = true;
     refreshBtn.disabled = true;
     if (reset) cursor = null;
@@ -637,14 +697,15 @@ export const DASHBOARD_HTML = `<!doctype html>
     try {
       var query = "/api/list?limit=60";
       if (cursor) query += "&cursor=" + encodeURIComponent(cursor);
-      var response = await fetch(query, { headers: authHeaders() });
+      var response = await fetch(query, { credentials: "same-origin" });
+      if (response.status === 401) {
+        showLogin("登录已过期，请重新登录。");
+        return;
+      }
       var data = await response.json().catch(function () {
         return {};
       });
       if (!response.ok || !data.ok) {
-        if (response.status === 401) {
-          throw new Error("令牌无效。载入列表与删除需要 ADMIN_TOKEN。");
-        }
         throw new Error(data.error || ("HTTP " + response.status));
       }
 
@@ -719,14 +780,14 @@ export const DASHBOARD_HTML = `<!doctype html>
       toast("请选择图片文件");
       return;
     }
-    if (!getToken()) {
-      toast("先填写上传令牌");
-      tokenInput.focus();
+    if (!currentUser) {
+      showLogin("请先登录。");
       return;
     }
 
     var uploaded = [];
     var lastError = null;
+    var unauthorized = false;
     showProgress(0, files.length);
     setLamp(true, "曝光中");
 
@@ -736,9 +797,14 @@ export const DASHBOARD_HTML = `<!doctype html>
         var filename = file.name || ("paste-" + Date.now() + guessExtension(file.type));
         var response = await fetch("/api/upload?filename=" + encodeURIComponent(filename), {
           method: "PUT",
-          headers: authHeaders({ "Content-Type": file.type || "application/octet-stream" }),
+          credentials: "same-origin",
+          headers: { "Content-Type": file.type || "application/octet-stream" },
           body: file
         });
+        if (response.status === 401) {
+          unauthorized = true;
+          break;
+        }
         var data = await response.json().catch(function () {
           return {};
         });
@@ -759,6 +825,10 @@ export const DASHBOARD_HTML = `<!doctype html>
       addCard(item, true);
     });
 
+    if (unauthorized) {
+      showLogin("登录已过期，请重新登录。");
+      return;
+    }
     if (lastError) {
       toast((uploaded.length > 0 ? "部分图片上传失败：" : "上传失败：") + (lastError.message || "未知错误"));
     } else {
@@ -772,29 +842,75 @@ export const DASHBOARD_HTML = `<!doctype html>
     }
   }
 
-  tokenInput.value = loadStoredToken();
-  updateTokenState();
-
-  tokenToggle.addEventListener("click", function () {
-    var visible = tokenInput.type === "text";
-    tokenInput.type = visible ? "password" : "text";
-    tokenToggle.textContent = visible ? "显示" : "隐藏";
-    tokenToggle.setAttribute("aria-label", visible ? "显示令牌" : "隐藏令牌");
-  });
-
-  tokenInput.addEventListener("change", function () {
-    storeToken(getToken());
-    updateTokenState();
-    loadList(true);
-  });
-
-  tokenInput.addEventListener("keydown", function (event) {
-    if (event.key === "Enter") {
-      event.preventDefault();
-      storeToken(getToken());
-      updateTokenState();
-      loadList(true);
+  async function checkSession() {
+    try {
+      var response = await fetch("/api/me", { credentials: "same-origin" });
+      if (response.ok) {
+        var data = await response.json();
+        if (data && data.ok && data.user) {
+          showApp(data.user);
+          return;
+        }
+      }
+    } catch (error) {
+      /* 网络错误时回退到登录页 */
     }
+    showLogin();
+  }
+
+  loginForm.addEventListener("submit", async function (event) {
+    event.preventDefault();
+    loginError.textContent = "";
+    var username = usernameInput.value.trim();
+    var password = passwordInput.value;
+    if (!username || !password) {
+      loginError.textContent = "请输入用户名和密码。";
+      return;
+    }
+
+    loginBtn.disabled = true;
+    loginBtn.textContent = "登录中…";
+    try {
+      var response = await fetch("/api/login", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: username, password: password })
+      });
+      var data = await response.json().catch(function () {
+        return {};
+      });
+      if (!response.ok || !data.ok) {
+        if (data.code === "AUTH_NOT_CONFIGURED") {
+          throw new Error("服务器尚未配置账号，请设置 ADMIN_USERNAME/ADMIN_PASSWORD 或 USER_USERNAME/USER_PASSWORD。");
+        }
+        if (response.status === 401) {
+          throw new Error("用户名或密码错误。");
+        }
+        throw new Error(data.error || "登录失败");
+      }
+      passwordInput.value = "";
+      showApp(data.user);
+      toast("已登录");
+    } catch (error) {
+      loginError.textContent = error.message || "登录失败";
+      passwordInput.focus();
+    } finally {
+      loginBtn.disabled = false;
+      loginBtn.textContent = "登录";
+    }
+  });
+
+  logoutBtn.addEventListener("click", async function () {
+    logoutBtn.disabled = true;
+    try {
+      await fetch("/api/logout", { method: "POST", credentials: "same-origin" });
+    } catch (error) {
+      /* 即使请求失败也回到登录页 */
+    }
+    logoutBtn.disabled = false;
+    showLogin();
+    toast("已退出");
   });
 
   drop.addEventListener("keydown", function (event) {
@@ -861,12 +977,7 @@ export const DASHBOARD_HTML = `<!doctype html>
     loadList(false);
   });
 
-  if (getToken()) {
-    loadList(true);
-  } else {
-    setEmptyMessage("设置令牌后载入图片列表。");
-    sheetSub.textContent = "需要令牌";
-  }
+  checkSession();
 })();
 </script>
 </body>

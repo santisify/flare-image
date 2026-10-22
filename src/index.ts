@@ -4,17 +4,21 @@
  * 路由:
  *   GET    /                       管理面板 (HTML)
  *   GET    /health                 健康检查
+ *   POST   /api/login              账号密码登录
+ *   POST   /api/logout             退出登录
+ *   GET    /api/me                 当前登录用户
  *   GET    /api                    接口与限制说明
- *   PUT    /api/upload             原始二进制上传 (UPLOAD_TOKEN)
- *   POST   /api/upload             multipart 上传 (UPLOAD_TOKEN)
- *   GET    /api/list               列表 + 游标分页 (ADMIN_TOKEN)
- *   DELETE /api/delete             单个 / 批量删除 (ADMIN_TOKEN)
+ *   PUT    /api/upload             原始二进制上传 (登录用户)
+ *   POST   /api/upload             multipart 上传 (登录用户)
+ *   GET    /api/list               列表 + 游标分页 (用户仅自己的图片)
+ *   DELETE /api/delete             单个 / 批量删除 (用户仅自己的图片)
  *   GET    /<key>                  图片读取 (Range / 条件请求 / 缓存)
  *   HEAD   /<key>                  只读元数据
  */
 
 import type { Env } from "../worker-configuration";
 import { handleDelete, handleList } from "./admin";
+import { handleLogin, handleLogout, handleMe } from "./auth";
 import { handleMultipartUpload, handleRawUpload } from "./upload";
 import { DASHBOARD_HTML } from "./ui";
 import {
@@ -81,7 +85,13 @@ function handleApiIndex(): Response {
   return jsonResponse({
     ok: true,
     service: "flare-image",
-    version: "1.1.0",
+    version: "1.2.0",
+    auth: {
+      login: "POST /api/login {username,password}",
+      logout: "POST /api/logout",
+      me: "GET /api/me",
+      apiClients: "HTTP Basic Auth (curl -u username:password)",
+    },
     endpoints: {
       upload: "PUT|POST /api/upload",
       list: "GET /api/list?prefix=&limit=&cursor=",
@@ -261,6 +271,21 @@ export default {
 
       if (url.pathname === "/api" && method === "GET") {
         return handleApiIndex();
+      }
+
+      if (url.pathname === "/api/login") {
+        if (method === "POST") return await handleLogin(request, env);
+        return methodNotAllowed("POST, OPTIONS");
+      }
+
+      if (url.pathname === "/api/logout") {
+        if (method === "POST") return handleLogout(request);
+        return methodNotAllowed("POST, OPTIONS");
+      }
+
+      if (url.pathname === "/api/me") {
+        if (method === "GET") return await handleMe(request, env);
+        return methodNotAllowed("GET, OPTIONS");
       }
 
       if (url.pathname === "/api/upload") {

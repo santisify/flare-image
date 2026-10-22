@@ -1,6 +1,6 @@
 import type { Env } from "../worker-configuration";
+import { requireAuth, uploadPrefix } from "./auth";
 import {
-  authorize,
   errorResponse,
   getEdgeCache,
   getPublicUrl,
@@ -83,11 +83,20 @@ export async function handleDelete(
   env: Env,
   ctx: ExecutionContext
 ): Promise<Response> {
-  const unauthorized = await authorize(request, env.ADMIN_TOKEN, "ADMIN_TOKEN");
-  if (unauthorized) return unauthorized;
+  const auth = await requireAuth(request, env);
+  if ("response" in auth) return auth.response;
+  const { user } = auth;
 
   const keys = await parseDeleteKeys(request);
   if (keys instanceof Response) return keys;
+
+  if (user.role !== "admin") {
+    const allowedPrefix = `${uploadPrefix("user")}/`;
+    const forbidden = keys.find((key) => !key.startsWith(allowedPrefix));
+    if (forbidden) {
+      return errorResponse("You can only delete your own images", 403, "FORBIDDEN");
+    }
+  }
 
   try {
     await env.IMAGES.delete(keys.length === 1 ? keys[0] : keys);
@@ -109,17 +118,26 @@ export async function handleDelete(
 
 /** GET /api/list?prefix=uploads/&limit=100&cursor=... */
 export async function handleList(request: Request, env: Env): Promise<Response> {
-  const unauthorized = await authorize(request, env.ADMIN_TOKEN, "ADMIN_TOKEN");
-  if (unauthorized) return unauthorized;
+  const auth = await requireAuth(request, env);
+  if ("response" in auth) return auth.response;
+  const { user } = auth;
 
   const url = new URL(request.url);
-  const prefix = url.searchParams.get("prefix") ?? "uploads/";
+  const defaultPrefix = user.role === "admin" ? "uploads/" : `${uploadPrefix("user")}/`;
+  const prefix = url.searchParams.get("prefix") ?? defaultPrefix;
   const cursor = url.searchParams.get("cursor") ?? undefined;
   const limitParam = url.searchParams.get("limit");
   const parsedLimit = limitParam === null ? 100 : Number.parseInt(limitParam, 10);
 
   if (sanitizePrefix(prefix) === null) {
     return errorResponse("Invalid prefix", 400, "INVALID_PREFIX");
+  }
+  if (user.role !== "admin") {
+    const allowedPrefix = `${uploadPrefix("user")}/`;
+    const normalizedPrefix = prefix.endsWith("/") ? prefix : `${prefix}/`;
+    if (!normalizedPrefix.startsWith(allowedPrefix)) {
+      return errorResponse("You can only list your own images", 403, "FORBIDDEN");
+    }
   }
   if (!Number.isInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > 1000) {
     return errorResponse("Limit must be between 1 and 1000", 400, "INVALID_LIMIT");

@@ -114,15 +114,8 @@ export function methodNotAllowed(allow: string): Response {
 
 // ─── 鉴权 ───────────────────────────────────────────────────────
 
-export function extractBearerToken(request: Request): string | null {
-  const header = request.headers.get("Authorization");
-  if (!header) return null;
-  const match = /^Bearer\s+(.+)$/i.exec(header);
-  return match ? match[1].trim() || null : null;
-}
-
 /**
- * 对 SHA-256 摘要做定长比较, 避免 Token 比较泄露时序信息。
+ * 对 SHA-256 摘要做定长比较, 避免密码 / 签名比较泄露时序信息。
  */
 export async function timingSafeEqual(a: string, b: string): Promise<boolean> {
   const encoder = new TextEncoder();
@@ -137,28 +130,6 @@ export async function timingSafeEqual(a: string, b: string): Promise<boolean> {
     diff |= bytesA[i] ^ bytesB[i];
   }
   return diff === 0;
-}
-
-/**
- * 校验请求 Token。通过返回 null, 否则返回错误响应。
- */
-export async function authorize(
-  request: Request,
-  expectedToken: string | undefined,
-  hint: string
-): Promise<Response | null> {
-  if (!expectedToken) {
-    return errorResponse(
-      `${hint} is not configured on the server`,
-      500,
-      "TOKEN_NOT_CONFIGURED"
-    );
-  }
-  const token = extractBearerToken(request);
-  if (!token || !(await timingSafeEqual(token, expectedToken))) {
-    return errorResponse("Missing or invalid Authorization header", 401, "UNAUTHORIZED");
-  }
-  return null;
 }
 
 // ─── 文件名 / Key ───────────────────────────────────────────────
@@ -205,12 +176,12 @@ export function sanitizePrefix(prefix: string): string | null {
   return prefix;
 }
 
-export function generateKey(ext: string, now = new Date()): string {
+export function generateKey(ext: string, prefix = "uploads", now = new Date()): string {
   const year = now.getUTCFullYear();
   const month = String(now.getUTCMonth() + 1).padStart(2, "0");
   const day = String(now.getUTCDate()).padStart(2, "0");
   const random = crypto.randomUUID().replace(/-/g, "");
-  return `uploads/${year}/${month}/${day}/${random}${ext}`;
+  return `${prefix}/${year}/${month}/${day}/${random}${ext}`;
 }
 
 /** 从 `Content-Disposition` 头里取文件名 (支持 filename*)。 */

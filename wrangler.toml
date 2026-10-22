@@ -14,9 +14,24 @@ bucket_name = "flare-images"
 # 留空 / 注释时自动使用当前请求的 origin。
 # PUBLIC_URL = "https://images.example.com"
 
-# 本地开发时可把密钥写入 .dev.vars（已在 .gitignore 中忽略）：
-#   UPLOAD_TOKEN="..."
-#   ADMIN_TOKEN="..."
-# 线上使用：
-#   npx wrangler secret put UPLOAD_TOKEN
-#   npx wrangler secret put ADMIN_TOKEN
+# 账号可以直接写在 [vars] 里，也可以使用 Cloudflare 控制台的
+# Settings -> Variables and Secrets，或用 wrangler secret 设置。
+#
+# 注意：如果仓库是公开的，不要把真实密码提交到 wrangler.toml。
+# 生产环境建议只把用户名放在 [vars]，密码用 secret：
+#   npx wrangler secret put ADMIN_PASSWORD
+#   npx wrangler secret put USER_PASSWORD
+#
+# ADMIN_USERNAME = "admin"
+# ADMIN_PASSWORD = "change-me-admin"
+# USER_USERNAME = "user"
+# USER_PASSWORD = "change-me-user"
+#
+# 可选：会话签名密钥。修改后所有已登录会话立即失效。
+# SESSION_SECRET = "a-long-random-string"
+
+# 本地开发时把账号密码写入 .dev.vars（已在 .gitignore 中忽略）：
+#   ADMIN_USERNAME="admin"
+#   ADMIN_PASSWORD="..."
+#   USER_USERNAME="user"
+#   USER_PASSWORD="..."
