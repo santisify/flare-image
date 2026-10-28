@@ -57,6 +57,7 @@ export const DASHBOARD_SCRIPT = `
   var previewItems = [];
   var previewIndex = -1;
   var previewReturnFocus = null;
+  var previewToken = 0;
   var columns = [];
   var resizeTimer = null;
 
@@ -85,6 +86,155 @@ export const DASHBOARD_SCRIPT = `
     if (!src) return;
     image.removeAttribute("data-src");
     image.src = src;
+  }
+
+  /* 缩略图：图库优先加载 data-thumb，失败或缺失时回退原图 */
+  var THUMB_MAX_EDGE = 960;
+  var THUMB_QUALITY = 0.82;
+
+  function thumbSource(item) {
+    if (item && item.thumb) return item.thumb;
+    if (item && item.url) return item.url + (item.url.indexOf("?") === -1 ? "?" : "&") + "thumb=1";
+    return "";
+  }
+
+  function supportsWebp() {
+    if (supportsWebp.cached !== undefined) return supportsWebp.cached;
+    var canvas = document.createElement("canvas");
+    canvas.width = 1;
+    canvas.height = 1;
+    var data = canvas.toDataURL("image/webp");
+    supportsWebp.cached = data.indexOf("data:image/webp") === 0;
+    return supportsWebp.cached;
+  }
+
+  /**
+   * 在浏览器里用 canvas 缩小图片, 生成缩略图 blob。
+   * GIF / SVG / AVIF(部分浏览器解码失败) 直接返回 null, 继续用原图。
+   */
+  function makeThumbnail(file) {
+    return new Promise(function (resolve) {
+      if (!file || !file.type || file.type.indexOf("image/") !== 0) {
+        resolve(null);
+        return;
+      }
+      if (file.type === "image/gif" || file.type === "image/svg+xml") {
+        resolve(null);
+        return;
+      }
+      var url = URL.createObjectURL(file);
+      var image = new Image();
+
+      function done(blob) {
+        URL.revokeObjectURL(url);
+        resolve(blob);
+      }
+
+      image.onload = function () {
+        try {
+          var width = image.naturalWidth || image.width;
+          var height = image.naturalHeight || image.height;
+          if (!width || !height) {
+            done(null);
+            return;
+          }
+          var scale = Math.min(1, THUMB_MAX_EDGE / Math.max(width, height));
+          var targetWidth = Math.max(1, Math.round(width * scale));
+          var targetHeight = Math.max(1, Math.round(height * scale));
+          var canvas = document.createElement("canvas");
+          canvas.width = targetWidth;
+          canvas.height = targetHeight;
+          var context = canvas.getContext("2d");
+          if (!context) {
+            done(null);
+            return;
+          }
+          context.imageSmoothingEnabled = true;
+          context.imageSmoothingQuality = "high";
+          context.drawImage(image, 0, 0, targetWidth, targetHeight);
+          canvas.toBlob(
+            function (blob) {
+              done(blob);
+            },
+            supportsWebp() ? "image/webp" : "image/jpeg",
+            THUMB_QUALITY
+          );
+        } catch (error) {
+          done(null);
+        }
+      };
+      image.onerror = function () {
+        done(null);
+      };
+      image.src = url;
+    });
+  }
+
+  /** 上传缩略图; 失败不影响主流程, 图库会回退到原图。 */
+  async function uploadThumbnail(key, blob) {
+    if (!blob) return false;
+    try {
+      var response = await fetch("/api/thumb?key=" + encodeURIComponent(key), {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "Content-Type": blob.type || "image/webp" },
+        body: blob
+      });
+      return response.ok;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  /* 补生成：旧图片 / API 上传的图片没有缩略图时, 图库加载完原图后用 canvas 缩小再上传 */
+  var THUMB_BACKFILL_LIMIT = 3;
+  var THUMB_BACKFILL_SKIP_SIZE = 8 * 1024 * 1024;
+  var backfillQueue = [];
+  var backfillActive = 0;
+
+  function canBackfill(item) {
+    if (!item || item.hasThumb) return false;
+    if (item.size && item.size > THUMB_BACKFILL_SKIP_SIZE) return false;
+    if (/\\.gif$/i.test(item.key) || /\\.svg$/i.test(item.key)) return false;
+    return true;
+  }
+
+  function backfillThumb(item, image) {
+    if (!canBackfill(item)) return;
+    if (backfillQueue.indexOf(item) !== -1) return;
+    backfillQueue.push(item);
+    pumpBackfill();
+  }
+
+  function pumpBackfill() {
+    while (backfillActive < THUMB_BACKFILL_LIMIT && backfillQueue.length > 0) {
+      var item = backfillQueue.shift();
+      backfillActive++;
+      generateThumbFromOriginal(item).finally(function () {
+        backfillActive--;
+        pumpBackfill();
+      });
+    }
+  }
+
+  async function generateThumbFromOriginal(item) {
+    try {
+      var response = await fetch(item.url, { credentials: "same-origin" });
+      if (!response.ok) return;
+      var blob = await response.blob();
+      if (!blob.type || blob.type.indexOf("image/") !== 0) return;
+
+      var thumbBlob = await makeThumbnail(blob);
+      if (!thumbBlob || thumbBlob.size >= blob.size) return;
+
+      var ok = await uploadThumbnail(item.key, thumbBlob);
+      if (ok) {
+        item.hasThumb = true;
+        item.thumb = item.url + (item.url.indexOf("?") === -1 ? "?" : "&") + "thumb=1";
+      }
+    } catch (error) {
+      /* 补生成失败就继续用原图 */
+    }
   }
 
   function setStatus(text, tone) {
@@ -268,7 +418,22 @@ export const DASHBOARD_SCRIPT = `
     lightboxImage.classList.remove("loaded");
     lightboxLoading.textContent = "载入中…";
     lightboxLoading.hidden = false;
-    lightboxImage.src = item.url;
+
+    // 先用缩略图占位, 原图下载完成后无缝替换, 避免长时间白屏。
+    previewToken++;
+    var token = previewToken;
+    var placeholder = item.thumb || item.url;
+    lightboxImage.src = placeholder;
+
+    if (placeholder !== item.url) {
+      var full = new Image();
+      full.onload = function () {
+        if (token !== previewToken || lightbox.hidden) return;
+        lightboxImage.src = item.url;
+      };
+      full.src = item.url;
+    }
+
     lightboxPrev.disabled = previewItems.length < 2;
     lightboxNext.disabled = previewItems.length < 2;
   }
@@ -357,12 +522,22 @@ export const DASHBOARD_SCRIPT = `
     image.alt = fileName(item.key);
     image.setAttribute("loading", "lazy");
     image.setAttribute("decoding", "async");
-    image.setAttribute("data-src", item.url);
+    image.setAttribute("data-src", thumbSource(item));
+    image.setAttribute("data-fallback", item.url);
+    image.setAttribute("data-key", item.key);
     image.addEventListener("load", function () {
       image.classList.add("loaded");
       link.classList.add("loaded");
+      backfillThumb(item, image);
     });
     image.addEventListener("error", function () {
+      // 缩略图缺失或损坏 → 回退原图。
+      var fallback = image.getAttribute("data-fallback");
+      if (fallback && image.src !== fallback) {
+        image.removeAttribute("data-fallback");
+        image.src = fallback;
+        return;
+      }
       link.classList.add("failed");
     });
     if (imageObserver) imageObserver.observe(image);
@@ -631,6 +806,20 @@ export const DASHBOARD_SCRIPT = `
           throw new Error(data.error || ("HTTP " + response.status));
         }
         uploaded.push(data);
+
+        // 立刻生成缩略图, 让图库首屏只下载小图。
+        try {
+          var thumbBlob = await makeThumbnail(file);
+          if (thumbBlob) {
+            var thumbOk = await uploadThumbnail(data.key, thumbBlob);
+            if (thumbOk) {
+              data.thumb = data.url + (data.url.indexOf("?") === -1 ? "?" : "&") + "thumb=1";
+              data.hasThumb = true;
+            }
+          }
+        } catch (thumbError) {
+          /* 缩略图失败不影响上传结果 */
+        }
       } catch (error) {
         lastError = error;
       }

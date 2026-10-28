@@ -1,5 +1,5 @@
 import type { Env } from "../../worker-configuration";
-import { ALLOWED_EXTENSIONS } from "./constants";
+import { ALLOWED_EXTENSIONS, THUMB_PREFIX } from "./constants";
 
 export function validateFileExtension(filename: string): { ext: string; mime: string } | null {
   const dotIndex = filename.lastIndexOf(".");
@@ -111,4 +111,14 @@ export function getPublicUrl(request: Request, env: Env): string {
 
 export function objectUrl(request: Request, env: Env, key: string): string {
   return `${getPublicUrl(request, env)}/${key}`;
+}
+
+/** 缩略图对象 key: `.thumbs/<原图 key>.thumb` */
+export function thumbKey(key: string): string {
+  return `${THUMB_PREFIX}${key}.thumb`;
+}
+
+/** 缩略图 URL: 原图 URL 加 `?thumb=1`, 由 Worker 决定返回缩略图还是原图 */
+export function thumbUrl(request: Request, env: Env, key: string): string {
+  return `${objectUrl(request, env, key)}?thumb=1`;
 }

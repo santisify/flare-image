@@ -14,6 +14,10 @@ export interface ListResponse {
   objects: {
     key: string;
     url: string;
+    /** 缩略图 URL (`?thumb=1`), 没有缩略图时回退到原图 */
+    thumb: string;
+    /** 是否已存在缩略图, 前端据此决定是否补生成 */
+    hasThumb: boolean;
     size: number;
     uploaded: string;
     etag: string;

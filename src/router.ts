@@ -10,6 +10,7 @@ import {
   methodNotAllowed,
 } from "./lib/http";
 import { handleMultipartUpload, handleRawUpload } from "./upload";
+import { handleThumbUpload } from "./thumb";
 import { DASHBOARD_HTML } from "./ui";
 
 const DASHBOARD_CSP = [
@@ -59,7 +60,8 @@ function handleApiIndex(): Response {
       upload: "PUT|POST /api/upload",
       list: "GET /api/list?prefix=&limit=&cursor=",
       delete: "DELETE /api/delete?key= (or JSON {keys})",
-      download: "GET|HEAD /<key>",
+      download: "GET|HEAD /<key>  (?thumb=1 返回缩略图)",
+      thumb: "PUT /api/thumb?key=<key> (image/webp|jpeg|png|avif)",
     },
     limits: {
       maxUploadSize: MAX_UPLOAD_SIZE,
@@ -125,6 +127,11 @@ export async function handleRequest(
     if (url.pathname === "/api/list") {
       if (method === "GET") return await handleList(request, env);
       return methodNotAllowed("GET, OPTIONS");
+    }
+
+    if (url.pathname === "/api/thumb") {
+      if (method === "PUT" || method === "POST") return await handleThumbUpload(request, env);
+      return methodNotAllowed("PUT, POST, OPTIONS");
     }
 
     if (url.pathname === "/api/delete") {

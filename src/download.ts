@@ -8,7 +8,7 @@ import {
   notFoundResponse,
   withCors,
 } from "./lib/http";
-import { sanitizeKey } from "./lib/keys";
+import { sanitizeKey, thumbKey } from "./lib/keys";
 
 interface ResolvedRange {
   start: number;
@@ -56,6 +56,54 @@ function buildDownloadHeaders(object: R2Object, key: string, requestUrl: URL): H
   return headers;
 }
 
+/**
+ * 返回缩略图响应; 不存在时返回 null, 由调用方回退到原图。
+ * 缩略图体积小, 一律整段返回, 不处理 Range。
+ */
+async function buildThumbResponse(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
+  key: string,
+  cacheKey: Request,
+  cache: Cache | null,
+  isHead: boolean
+): Promise<Response | null> {
+  let thumb: R2ObjectBody | null;
+  try {
+    thumb = await env.IMAGES.get(thumbKey(key));
+  } catch (err) {
+    console.error("R2 thumb get failed", err);
+    return null;
+  }
+  if (!thumb) return null;
+
+  const headers = new Headers();
+  thumb.writeHttpMetadata(headers);
+  headers.set("etag", thumb.httpEtag);
+  if (!headers.has("content-type")) headers.set("content-type", "image/webp");
+  headers.set(
+    "cache-control",
+    `public, max-age=${IMAGE_CACHE_MAX_AGE}, s-maxage=${IMAGE_CACHE_MAX_AGE}, immutable`
+  );
+  headers.set("x-content-type-options", "nosniff");
+  headers.set("x-flare-thumb", "1");
+  headers.set("content-length", String(thumb.size));
+
+  const response = withCors(
+    new Response(isHead ? null : thumb.body, { status: 200, headers })
+  );
+
+  if (!isHead && cache) {
+    ctx.waitUntil(
+      cache.put(cacheKey, response.clone()).catch((err: unknown) => {
+        console.error("Cache put failed", err);
+      })
+    );
+  }
+  return response;
+}
+
 /** GET|HEAD /<key> */
 export async function handleDownload(
   request: Request,
@@ -76,6 +124,7 @@ export async function handleDownload(
   const method = request.method.toUpperCase();
   const isHead = method === "HEAD";
   const hasRange = request.headers.has("range");
+  const wantsThumb = url.searchParams.get("thumb") === "1";
   const canUseCache = !isHead && !hasRange && !hasConditionalHeaders(request);
   const cacheKey = new Request(url.toString(), { method: "GET" });
 
@@ -87,6 +136,21 @@ export async function handleDownload(
     } catch {
       // Cache API 不可用时直接回源。
     }
+  }
+
+  if (wantsThumb) {
+    const thumbResponse = await buildThumbResponse(
+      request,
+      env,
+      ctx,
+      key,
+      cacheKey,
+      cache,
+      isHead
+    );
+    if (thumbResponse) return thumbResponse;
+    // 没有缩略图 (旧图片 / API 上传 / GIF 等) → 回退原图, 只做短缓存,
+    // 便于浏览器端补生成缩略图后很快拿到新版本。
   }
 
   let object: R2ObjectBody | R2Object | null;
@@ -112,6 +176,11 @@ export async function handleDownload(
   if (object === null) return notFoundResponse();
 
   const headers = buildDownloadHeaders(object, key, url);
+  if (wantsThumb) {
+    // 缩略图缺失时的原图兜底: 短缓存 (5 分钟), 避免补生成后仍长时间命中旧内容。
+    headers.set("cache-control", "public, max-age=300, s-maxage=300");
+    headers.set("x-flare-thumb", "0");
+  }
 
   // onlyIf 条件失败时 R2 返回没有 body 的 R2Object。
   if (!("body" in object)) {

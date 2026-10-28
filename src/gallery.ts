@@ -1,10 +1,17 @@
 import type { Env } from "../worker-configuration";
 import { requireAuth, storagePrefix } from "./auth";
 import { getEdgeCache } from "./lib/cache";
-import { MAX_DELETE_KEYS } from "./lib/constants";
+import { MAX_DELETE_KEYS, THUMB_PREFIX } from "./lib/constants";
 import { errorResponse, jsonResponse } from "./lib/http";
 import type { DeleteResponse, ListResponse } from "./lib/http";
-import { getPublicUrl, objectUrl, sanitizeKey, sanitizePrefix } from "./lib/keys";
+import {
+  getPublicUrl,
+  objectUrl,
+  sanitizeKey,
+  sanitizePrefix,
+  thumbKey,
+  thumbUrl,
+} from "./lib/keys";
 
 function cacheKeysFor(request: Request, env: Env, key: string): Request[] {
   const urls = new Set<string>([new URL(`/${key}`, request.url).toString()]);
@@ -16,12 +23,17 @@ function cacheKeysFor(request: Request, env: Env, key: string): Request[] {
 function purgeCache(ctx: ExecutionContext, request: Request, env: Env, key: string): void {
   const cache = getEdgeCache();
   if (!cache) return;
+  const keys = cacheKeysFor(request, env, key);
+  // 缩略图 URL 也带 ?thumb=1, 一并清掉。
+  for (const cacheKey of cacheKeysFor(request, env, key)) {
+    const thumbCacheKey = new URL(cacheKey.url);
+    thumbCacheKey.searchParams.set("thumb", "1");
+    keys.push(new Request(thumbCacheKey.toString(), { method: "GET" }));
+  }
   ctx.waitUntil(
-    Promise.all(
-      cacheKeysFor(request, env, key).map((cacheKey) =>
-        cache.delete(cacheKey).catch(() => undefined)
-      )
-    ).then(() => undefined)
+    Promise.all(keys.map((cacheKey) => cache.delete(cacheKey).catch(() => undefined))).then(
+      () => undefined
+    )
   );
 }
 
@@ -93,6 +105,13 @@ export async function handleDelete(
 
   try {
     await env.IMAGES.delete(keys.length === 1 ? keys[0] : keys);
+    // 一并删除对应的缩略图, 避免留下孤儿对象。
+    const thumbs = keys.map(thumbKey);
+    await env.IMAGES.delete(thumbs.length === 1 ? thumbs[0] : thumbs).catch(
+      (err: unknown) => {
+        console.error("R2 thumb delete failed", err);
+      }
+    );
     for (const key of keys) {
       purgeCache(ctx, request, env, key);
     }
@@ -107,6 +126,49 @@ export async function handleDelete(
     const message = err instanceof Error ? err.message : String(err);
     return errorResponse(`R2 delete failed: ${message}`, 500, "R2_ERROR");
   }
+}
+
+/**
+ * 找出本页对象里已存在缩略图的 key。
+ * 缩略图按原图目录归档, 每个目录列一次即可, 避免逐条 HEAD。
+ * 并发与目录数都设上限, 防止管理员页面产生过多子请求。
+ */
+const THUMB_INDEX_CONCURRENCY = 6;
+const THUMB_INDEX_MAX_DIRS = 24;
+
+async function loadThumbIndex(env: Env, objects: R2Object[]): Promise<Set<string>> {
+  const found = new Set<string>();
+  const dirs = new Set<string>();
+  for (const object of objects) {
+    const slash = object.key.lastIndexOf("/");
+    if (slash > 0) dirs.add(object.key.slice(0, slash));
+    if (dirs.size >= THUMB_INDEX_MAX_DIRS) break;
+  }
+
+  const queue = [...dirs];
+  async function worker(): Promise<void> {
+    for (;;) {
+      const dir = queue.shift();
+      if (dir === undefined) return;
+      try {
+        const listed = await env.IMAGES.list({
+          prefix: `${THUMB_PREFIX}${dir}/`,
+          limit: 1000,
+        });
+        for (const thumb of listed.objects) {
+          if (!thumb.key.endsWith(".thumb")) continue;
+          found.add(thumb.key.slice(THUMB_PREFIX.length, -".thumb".length));
+        }
+      } catch (err) {
+        console.error("R2 thumb list failed", err);
+      }
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(THUMB_INDEX_CONCURRENCY, queue.length) }, () => worker())
+  );
+  return found;
 }
 
 /** GET /api/list?prefix=upload/file/&limit=100&cursor=... */
@@ -139,14 +201,19 @@ export async function handleList(request: Request, env: Env): Promise<Response> 
 
   try {
     const result = await env.IMAGES.list({ prefix, cursor, limit: parsedLimit });
+    // `.thumbs/` 下的缩略图对象不属于图库内容。
+    const images = result.objects.filter((object) => !object.key.startsWith(THUMB_PREFIX));
+    const thumbs = await loadThumbIndex(env, images);
     const response: ListResponse = {
       ok: true,
-      count: result.objects.length,
+      count: images.length,
       truncated: result.truncated,
       cursor: result.truncated ? result.cursor : null,
-      objects: result.objects.map((object) => ({
+      objects: images.map((object) => ({
         key: object.key,
         url: objectUrl(request, env, object.key),
+        thumb: thumbUrl(request, env, object.key),
+        hasThumb: thumbs.has(object.key),
         size: object.size,
         uploaded: object.uploaded.toISOString(),
         etag: object.httpEtag,

@@ -25,3 +25,20 @@ export const MAX_DELETE_KEYS = 1000;
 
 /** 图片缓存时长: 1 年 */
 export const IMAGE_CACHE_MAX_AGE = 60 * 60 * 24 * 365;
+
+/**
+ * 缩略图对象前缀。与 upload/ 分隔, 列表接口会过滤掉该前缀,
+ * 避免缩略图出现在图库中。
+ */
+export const THUMB_PREFIX = ".thumbs/";
+
+/** 缩略图对象体积上限 (浏览器端生成, 通常 < 100 KB) */
+export const MAX_THUMB_SIZE = 1024 * 1024;
+
+/** 允许写入的缩略图类型 (canvas 能导出的格式) */
+export const THUMB_CONTENT_TYPES = new Set([
+  "image/webp",
+  "image/jpeg",
+  "image/png",
+  "image/avif",
+]);
