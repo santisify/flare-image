@@ -28,6 +28,7 @@ export const DASHBOARD_SCRIPT = `
   var moreWrap = document.getElementById("moreWrap");
   var moreBtn = document.getElementById("more");
   var refreshBtn = document.getElementById("refresh");
+  var densityGroup = document.getElementById("density");
   var sheetHeading = document.getElementById("sheetHeading");
   var sheetSub = document.getElementById("sheetSub");
   var railUser = document.getElementById("railUser");
@@ -58,6 +59,15 @@ export const DASHBOARD_SCRIPT = `
   var previewReturnFocus = null;
   var columns = [];
   var resizeTimer = null;
+
+  /* 缩略图密度：min 为桌面端单列最小宽度，mobileMin 为移动端单列最小宽度 */
+  var DENSITY = {
+    compact: { min: 200, gap: 14, mobileMin: 118, mobileGap: 10, max: 6 },
+    standard: { min: 280, gap: 18, mobileMin: 160, mobileGap: 12, max: 5 },
+    large: { min: 360, gap: 22, mobileMin: 236, mobileGap: 14, max: 4 }
+  };
+  var DENSITY_KEY = "flare-image:tile-size";
+  var density = loadDensity();
 
   var imageObserver = null;
   if ("IntersectionObserver" in window) {
@@ -124,12 +134,65 @@ export const DASHBOARD_SCRIPT = `
   }
 
   function columnCount() {
-    var compact = window.matchMedia && window.matchMedia("(max-width:640px)").matches;
-    var minWidth = compact ? 132 : 180;
-    var gap = compact ? 12 : 18;
+    var metrics = tileMetrics();
     var width = grid.clientWidth || grid.getBoundingClientRect().width || 0;
     if (!width) return 1;
-    return Math.max(1, Math.floor((width + gap) / (minWidth + gap)));
+    var count = Math.floor((width + metrics.gap) / (metrics.min + metrics.gap));
+    if (metrics.compact) return Math.max(1, Math.min(count, 2));
+    var floorCount = width >= 560 ? 2 : 1;
+    return Math.max(floorCount, Math.min(count, metrics.max));
+  }
+
+  function isCompactViewport() {
+    if (!window.matchMedia) return window.innerWidth <= 640;
+    return window.matchMedia("(max-width:640px)").matches;
+  }
+
+  function tileMetrics() {
+    var preset = DENSITY[density] || DENSITY.large;
+    var compact = isCompactViewport();
+    return {
+      min: compact ? preset.mobileMin : preset.min,
+      gap: compact ? preset.mobileGap : preset.gap,
+      max: preset.max,
+      compact: compact
+    };
+  }
+
+  function loadDensity() {
+    try {
+      var saved = window.localStorage.getItem(DENSITY_KEY);
+      if (saved && DENSITY[saved]) return saved;
+    } catch (error) {
+      /* 隐私模式下 localStorage 不可用 */
+    }
+    return "large";
+  }
+
+  function saveDensity(value) {
+    try {
+      window.localStorage.setItem(DENSITY_KEY, value);
+    } catch (error) {
+      /* 忽略写入失败 */
+    }
+  }
+
+  function applyDensity() {
+    grid.style.setProperty("--tile-gap", tileMetrics().gap + "px");
+    if (!densityGroup) return;
+    var buttons = densityGroup.querySelectorAll("button[data-density]");
+    for (var i = 0; i < buttons.length; i++) {
+      var active = buttons[i].getAttribute("data-density") === density;
+      buttons[i].setAttribute("aria-pressed", active ? "true" : "false");
+    }
+  }
+
+  function setDensity(value) {
+    if (!DENSITY[value] || value === density) return;
+    density = value;
+    saveDensity(value);
+    applyDensity();
+    if (grid.querySelector(".frame")) rebuildColumns();
   }
 
   function createColumns() {
@@ -738,9 +801,20 @@ export const DASHBOARD_SCRIPT = `
   window.addEventListener("resize", function () {
     if (resizeTimer) clearTimeout(resizeTimer);
     resizeTimer = setTimeout(function () {
+      applyDensity();
       if (columns.length !== columnCount()) rebuildColumns();
     }, 150);
   });
+
+  if (densityGroup) {
+    densityGroup.addEventListener("click", function (event) {
+      var target = event.target;
+      if (!target || !target.getAttribute) return;
+      var value = target.getAttribute("data-density");
+      if (!value) return;
+      setDensity(value);
+    });
+  }
 
   refreshBtn.addEventListener("click", function () {
     loadList(true);
@@ -803,6 +877,7 @@ export const DASHBOARD_SCRIPT = `
     }
   });
 
+  applyDensity();
   checkSession();
 })();
 `;

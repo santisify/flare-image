@@ -112,7 +112,14 @@ export const DASHBOARD_HTML = `<!doctype html>
           <h2 id="sheetHeading">全部图片</h2>
           <p class="sheet-sub" id="sheetSub">正在载入</p>
         </div>
-        <button id="refresh" class="btn" type="button">刷新</button>
+        <div class="gallery-tools">
+          <div class="view-switch" id="density" role="group" aria-label="缩略图大小">
+            <button type="button" data-density="compact" aria-pressed="false" title="紧凑：一屏看到更多图片">紧凑</button>
+            <button type="button" data-density="standard" aria-pressed="false" title="标准：兼顾数量与尺寸">标准</button>
+            <button type="button" data-density="large" aria-pressed="true" title="大图：缩略图尽量大">大图</button>
+          </div>
+          <button id="refresh" class="btn" type="button">刷新</button>
+        </div>
       </header>
 
       <div class="grid" id="grid"></div>

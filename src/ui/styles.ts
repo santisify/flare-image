@@ -16,6 +16,7 @@ export const DASHBOARD_STYLES = `
     --mono:"SFMono-Regular","Cascadia Mono","Roboto Mono",Menlo,Consolas,monospace;
     --rail:380px;
     --topbar:58px;
+    --tile-gap:22px;
   }
   *{box-sizing:border-box}
   html{background:var(--paper)}
@@ -437,17 +438,43 @@ export const DASHBOARD_STYLES = `
   }
   .btn:hover{background:var(--ink);color:var(--paper-2)}
   .btn:disabled{opacity:.4;cursor:default}
+  .gallery-tools{
+    display:flex;
+    align-items:center;
+    justify-content:flex-end;
+    flex-wrap:wrap;
+    gap:10px;
+  }
+  .view-switch{
+    display:inline-flex;
+    border:1px solid var(--ink);
+    background:var(--surface);
+  }
+  .view-switch button{
+    padding:8px 12px;
+    border:0;
+    border-left:1px solid var(--line);
+    background:transparent;
+    color:var(--ink);
+    font-family:var(--mono);
+    font-size:10px;
+    letter-spacing:.04em;
+    transition:background .15s,color .15s;
+  }
+  .view-switch button:first-child{border-left:0}
+  .view-switch button:hover{background:var(--accent);color:var(--ink)}
+  .view-switch button[aria-pressed="true"]{background:var(--ink);color:var(--paper-2)}
   .grid{
     display:flex;
     align-items:flex-start;
-    gap:18px;
+    gap:var(--tile-gap);
     padding-top:26px;
   }
   .col{
     display:flex;
     flex:1 1 0;
     flex-direction:column;
-    gap:24px;
+    gap:var(--tile-gap);
     min-width:0;
   }
   .frame{margin:0;min-width:0}
@@ -782,9 +809,10 @@ export const DASHBOARD_STYLES = `
     .login-panel{padding:30px 20px 50px}
     .rail{padding:26px 18px}
     .gallery{padding:26px 16px 48px}
-    .gallery-head{align-items:flex-start;gap:16px}
-    .grid{gap:12px}
-    .col{gap:18px}
+    .gallery-head{align-items:flex-start;flex-wrap:wrap;gap:16px}
+    .gallery-tools{width:100%;justify-content:flex-start}
+    .grid{gap:var(--tile-gap,12px)}
+    .col{gap:var(--tile-gap,12px)}
     .lightbox{padding:8px}
     .lightbox-head{flex-direction:column;align-items:flex-start;gap:10px}
     .lightbox-tools{width:100%;justify-content:flex-start}
