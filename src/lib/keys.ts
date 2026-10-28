@@ -1,5 +1,5 @@
 import type { Env } from "../../worker-configuration";
-import { ALLOWED_EXTENSIONS, THUMB_PREFIX } from "./constants";
+import { ALLOWED_EXTENSIONS, LEGACY_THUMB_PREFIX, THUMB_PREFIX } from "./constants";
 
 export function validateFileExtension(filename: string): { ext: string; mime: string } | null {
   const dotIndex = filename.lastIndexOf(".");
@@ -113,9 +113,19 @@ export function objectUrl(request: Request, env: Env, key: string): string {
   return `${getPublicUrl(request, env)}/${key}`;
 }
 
-/** 缩略图对象 key: `.thumbs/<原图 key>.thumb` */
+/** 缩略图对象 key: `~thumbs/<原图 key>.thumb` */
 export function thumbKey(key: string): string {
   return `${THUMB_PREFIX}${key}.thumb`;
+}
+
+/** 旧前缀的缩略图 key, 读取时作为回退 */
+export function legacyThumbKey(key: string): string {
+  return `${LEGACY_THUMB_PREFIX}${key}.thumb`;
+}
+
+/** 判断某个 key 是否为缩略图对象 */
+export function isThumbObject(key: string): boolean {
+  return key.startsWith(THUMB_PREFIX) || key.startsWith(LEGACY_THUMB_PREFIX);
 }
 
 /** 缩略图 URL: 原图 URL 加 `?thumb=1`, 由 Worker 决定返回缩略图还是原图 */

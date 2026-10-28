@@ -291,8 +291,29 @@ GET /upload/file/8c6976e5b5410415bde908bd4dee15df/a1b2c3d4e5f6.jpg
 - 支持 `If-None-Match` / `If-Modified-Since` → `304`
 - 支持 `If-Match` / `If-Unmodified-Since` → 条件失败时 `412`
 - 加 `?download=1` 返回 `Content-Disposition: attachment`
+- 加 `?thumb=1` 返回缩略图（存在时）；不存在则原图兜底，只做 5 分钟缓存
 - 缓存头为一年 `immutable`，同时写入 Worker Cache API
 - SVG 响应附带 CSP 沙箱，避免脚本在 Worker 域名执行
+
+### 缩略图上传
+
+图库首屏不加载原图，而是加载浏览器端生成的缩略图（最长边 960px，WebP）。
+
+```http
+PUT /api/thumb?key=<原图 key>
+Content-Type: image/webp
+
+<二进制>
+```
+
+- 需要登录（Cookie 或 Basic Auth），普通用户只能给自己的图片加缩略图
+- 原图必须存在（`404`）
+- 类型仅接受 `image/webp` / `image/jpeg` / `image/png` / `image/avif`
+- 体积上限 1 MB，且必须小于原图，否则 `400`
+- 存放位置为 `~thumbs/<原图 key>.thumb`，不出现在列表里
+
+缩略图缺失时（旧图片、API 上传、GIF / SVG）自动回退原图，并在图库浏览器里
+后台补生成一次，后续访问即走缩略图。
 
 ### 列表
 
@@ -303,6 +324,8 @@ GET /api/list?prefix=upload/file/&limit=100&cursor=<cursor>
 - 管理员默认列出全部对象
 - 用户默认只列出 `upload/file/<username-hash>/`，传其他前缀会返回 `403`
 - `limit` 范围 1–1000，默认 100
+- 缩略图对象（`~thumbs/`、旧版 `.thumbs/`）会被过滤掉；服务端会自动续翻页，
+  保证一页里全是真实图片
 
 ```json
 {
@@ -314,6 +337,8 @@ GET /api/list?prefix=upload/file/&limit=100&cursor=<cursor>
     {
       "key": "upload/file/04f8996da763b7a969b1028ee3007569/a1b2c3d4e5f6.jpg",
       "url": "https://images.example.com/upload/file/04f8996da763b7a969b1028ee3007569/a1b2c3d4e5f6.jpg",
+      "thumb": "https://images.example.com/upload/file/04f8996da763b7a969b1028ee3007569/a1b2c3d4e5f6.jpg?thumb=1",
+      "hasThumb": true,
       "size": 123456,
       "uploaded": "2026-10-21T12:00:00.000Z",
       "etag": "\"abc123\""

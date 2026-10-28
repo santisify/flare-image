@@ -699,26 +699,35 @@ export const DASHBOARD_SCRIPT = `
     if (reset) cursor = null;
 
     try {
-      var query = "/api/list?limit=60";
-      if (cursor) query += "&cursor=" + encodeURIComponent(cursor);
-      var response = await fetch(query, { credentials: "same-origin" });
-      if (response.status === 401) {
-        showLogin("登录已过期，请重新登录。");
-        return;
-      }
-      var data = await response.json().catch(function () {
-        return {};
-      });
-      if (!response.ok || !data.ok) {
-        throw new Error(data.error || ("HTTP " + response.status));
-      }
+      // 首页可能因为服务端分页而返回空数组 (例如列表里混入了非图片对象),
+      // 这里自动续翻, 最多 3 页, 避免图库误显示为空。
+      var guard = 0;
+      var addedTotal = 0;
+      do {
+        var query = "/api/list?limit=60";
+        if (cursor) query += "&cursor=" + encodeURIComponent(cursor);
+        var response = await fetch(query, { credentials: "same-origin" });
+        if (response.status === 401) {
+          showLogin("登录已过期，请重新登录。");
+          return;
+        }
+        var data = await response.json().catch(function () {
+          return {};
+        });
+        if (!response.ok || !data.ok) {
+          throw new Error(data.error || ("HTTP " + response.status));
+        }
 
-      if (reset) clearGrid();
-      data.objects.forEach(function (object) {
-        addCard(object, false);
-      });
-      cursor = data.cursor || null;
-      hasMore = Boolean(data.truncated);
+        if (reset && addedTotal === 0) clearGrid();
+        (data.objects || []).forEach(function (object) {
+          addCard(object, false);
+          addedTotal++;
+        });
+        cursor = data.cursor || null;
+        hasMore = Boolean(data.truncated);
+        guard++;
+      } while (addedTotal === 0 && guard < 3 && hasMore && cursor);
+
       refreshCount();
       setStatus("已连接", "ok");
     } catch (error) {

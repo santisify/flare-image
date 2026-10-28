@@ -1,11 +1,13 @@
 import type { Env } from "../worker-configuration";
 import { requireAuth, storagePrefix } from "./auth";
 import { getEdgeCache } from "./lib/cache";
-import { MAX_DELETE_KEYS, THUMB_PREFIX } from "./lib/constants";
+import { MAX_DELETE_KEYS, LEGACY_THUMB_PREFIX, THUMB_PREFIX } from "./lib/constants";
 import { errorResponse, jsonResponse } from "./lib/http";
 import type { DeleteResponse, ListResponse } from "./lib/http";
 import {
   getPublicUrl,
+  isThumbObject,
+  legacyThumbKey,
   objectUrl,
   sanitizeKey,
   sanitizePrefix,
@@ -105,13 +107,15 @@ export async function handleDelete(
 
   try {
     await env.IMAGES.delete(keys.length === 1 ? keys[0] : keys);
-    // 一并删除对应的缩略图, 避免留下孤儿对象。
-    const thumbs = keys.map(thumbKey);
-    await env.IMAGES.delete(thumbs.length === 1 ? thumbs[0] : thumbs).catch(
-      (err: unknown) => {
+    // 一并删除对应的缩略图 (新旧两个前缀), 避免留下孤儿对象。
+    // R2 单次 delete 最多 1000 个 key, 这里分批。
+    const thumbs = keys.flatMap((key) => [thumbKey(key), legacyThumbKey(key)]);
+    for (let i = 0; i < thumbs.length; i += MAX_DELETE_KEYS) {
+      const batch = thumbs.slice(i, i + MAX_DELETE_KEYS);
+      await env.IMAGES.delete(batch).catch((err: unknown) => {
         console.error("R2 thumb delete failed", err);
-      }
-    );
+      });
+    }
     for (const key of keys) {
       purgeCache(ctx, request, env, key);
     }
@@ -150,17 +154,19 @@ async function loadThumbIndex(env: Env, objects: R2Object[]): Promise<Set<string
     for (;;) {
       const dir = queue.shift();
       if (dir === undefined) return;
-      try {
-        const listed = await env.IMAGES.list({
-          prefix: `${THUMB_PREFIX}${dir}/`,
-          limit: 1000,
-        });
-        for (const thumb of listed.objects) {
-          if (!thumb.key.endsWith(".thumb")) continue;
-          found.add(thumb.key.slice(THUMB_PREFIX.length, -".thumb".length));
+      for (const prefix of [THUMB_PREFIX, LEGACY_THUMB_PREFIX]) {
+        try {
+          const listed = await env.IMAGES.list({
+            prefix: `${prefix}${dir}/`,
+            limit: 1000,
+          });
+          for (const thumb of listed.objects) {
+            if (!thumb.key.endsWith(".thumb")) continue;
+            found.add(thumb.key.slice(prefix.length, -".thumb".length));
+          }
+        } catch (err) {
+          console.error("R2 thumb list failed", err);
         }
-      } catch (err) {
-        console.error("R2 thumb list failed", err);
       }
     }
   }
@@ -169,6 +175,72 @@ async function loadThumbIndex(env: Env, objects: R2Object[]): Promise<Set<string
     Array.from({ length: Math.min(THUMB_INDEX_CONCURRENCY, queue.length) }, () => worker())
   );
   return found;
+}
+
+/**
+ * 分页列出真实图片。
+ *
+ * `.thumbs/` 的字典序在 `upload/` 之前, 如果直接拿 R2 的一页结果过滤,
+ * 缩略图会占满整页, 导致第一页一张图片都返回不了 (图库空白)。
+ * 这里在 Worker 内部继续翻页, 直到凑够 limit 或翻到底, 最多翻 20 页。
+ */
+const LIST_MAX_PAGES = 20;
+
+async function listImages(
+  env: Env,
+  prefix: string,
+  cursor: string | undefined,
+  limit: number
+): Promise<{ objects: R2Object[]; cursor: string | null; truncated: boolean }> {
+  const images: R2Object[] = [];
+  let nextCursor = cursor;
+  let truncated = true;
+
+  // 旧缩略图前缀 "." 排在所有图片之前。没有 cursor 时直接跳过这一段,
+  // 避免大量旧缩略图把第一页挤空 (R2 按 key 字典序返回)。
+  const startAfter =
+    cursor === undefined && prefix === "" ? `${LEGACY_THUMB_PREFIX}\uffff` : undefined;
+
+  for (let page = 0; page < LIST_MAX_PAGES; page++) {
+    const remaining = limit - images.length;
+    if (remaining <= 0) break;
+
+    const options: R2ListOptions = {
+      prefix,
+      cursor: nextCursor,
+      limit: remaining,
+    };
+    // 只在第一页跳过旧缩略图区间; 万一 R2 拒绝 startAfter, 退回普通分页。
+    const useStartAfter = page === 0 && startAfter !== undefined && nextCursor === undefined;
+    if (useStartAfter) options.startAfter = startAfter;
+
+    let result: R2Objects;
+    try {
+      result = await env.IMAGES.list(options);
+    } catch (err) {
+      if (!useStartAfter) throw err;
+      delete options.startAfter;
+      result = await env.IMAGES.list(options);
+    }
+
+    // 按剩余名额请求, 保证一页里混入缩略图时也不会溢出、不会漏掉图片。
+    for (const object of result.objects) {
+      if (isThumbObject(object.key)) continue;
+      images.push(object);
+    }
+    truncated = result.truncated;
+    nextCursor = result.truncated ? result.cursor : undefined;
+
+    if (!truncated || !nextCursor) break;
+  }
+
+  const hasMore = truncated && nextCursor !== undefined;
+
+  return {
+    objects: images,
+    cursor: hasMore ? (nextCursor ?? null) : null,
+    truncated: hasMore,
+  };
 }
 
 /** GET /api/list?prefix=upload/file/&limit=100&cursor=... */
@@ -200,16 +272,14 @@ export async function handleList(request: Request, env: Env): Promise<Response> 
   }
 
   try {
-    const result = await env.IMAGES.list({ prefix, cursor, limit: parsedLimit });
-    // `.thumbs/` 下的缩略图对象不属于图库内容。
-    const images = result.objects.filter((object) => !object.key.startsWith(THUMB_PREFIX));
-    const thumbs = await loadThumbIndex(env, images);
+    const result = await listImages(env, prefix, cursor, parsedLimit);
+    const thumbs = await loadThumbIndex(env, result.objects);
     const response: ListResponse = {
       ok: true,
-      count: images.length,
+      count: result.objects.length,
       truncated: result.truncated,
-      cursor: result.truncated ? result.cursor : null,
-      objects: images.map((object) => ({
+      cursor: result.cursor,
+      objects: result.objects.map((object) => ({
         key: object.key,
         url: objectUrl(request, env, object.key),
         thumb: thumbUrl(request, env, object.key),

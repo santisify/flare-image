@@ -8,7 +8,7 @@ import {
   notFoundResponse,
   withCors,
 } from "./lib/http";
-import { sanitizeKey, thumbKey } from "./lib/keys";
+import { isThumbObject, legacyThumbKey, sanitizeKey, thumbKey } from "./lib/keys";
 
 interface ResolvedRange {
   start: number;
@@ -72,6 +72,7 @@ async function buildThumbResponse(
   let thumb: R2ObjectBody | null;
   try {
     thumb = await env.IMAGES.get(thumbKey(key));
+    if (!thumb) thumb = await env.IMAGES.get(legacyThumbKey(key));
   } catch (err) {
     console.error("R2 thumb get failed", err);
     return null;
@@ -116,6 +117,10 @@ export async function handleDownload(
     key = decodeURIComponent(url.pathname.slice(1));
   } catch {
     return errorResponse("Invalid key encoding", 400, "INVALID_KEY");
+  }
+  // 缩略图对象本身不对外暴露, 只能通过原图 key + ?thumb=1 访问。
+  if (isThumbObject(key)) {
+    return notFoundResponse();
   }
   if (!sanitizeKey(key)) {
     return errorResponse("Invalid key", 400, "INVALID_KEY");
